@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Wandee Clinic — Marketing System</title>
+<link rel="preconnect" href="https://esm.sh" />
+<style>
+  html, body { margin: 0; height: 100%; background: #FBF7F4; }
+  #root { min-height: 100%; }
+  #boot { position: fixed; inset: 0; display: grid; place-items: center; background: #FBF7F4;
+    color: #9E3D5E; font-family: Georgia, serif; font-size: 16px; z-index: 9999; }
+  #boot .sp { width: 34px; height: 34px; border: 3px solid #E7D6CD; border-top-color: #9E3D5E;
+    border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.2.0,react-dom@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="boot"><div><div class="sp"></div>กำลังเปิดระบบ…</div></div>
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  LayoutDashboard, CalendarDays, ListChecks, Plus, Trash2, Pencil, X,
+  TrendingUp, CheckCircle2, Clock, AlertTriangle, Wallet, Eye, Search,
+  Megaphone, Save, Sparkles, ChevronDown, Users, Award, Download,
+  MessageSquare, BadgeCheck, ClipboardCheck, History, Bell
+} from "lucide-react";
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  LineChart, Line, CartesianGrid, Legend
+} from "recharts";
+
+/* ===== ที่เก็บข้อมูลถาวรในเบราว์เซอร์ (IndexedDB) ===== */
+window.storage = (function () {
+  const DB = "wandee_db", STORE = "kv";
+  function open() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  function reqP(req) { return new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }); }
+  async function run(mode, fn) { const db = await open(); const t = db.transaction(STORE, mode); const s = t.objectStore(STORE); return fn(s); }
+  return {
+    async get(k) { const v = await run("readonly", (s) => reqP(s.get(k))); return v == null ? null : { key: k, value: v }; },
+    async set(k, v) { await run("readwrite", (s) => reqP(s.put(v, k))); return { key: k, value: v }; },
+    async delete(k) { await run("readwrite", (s) => reqP(s.delete(k))); return { key: k, deleted: true }; },
+    async list(prefix = "") { const keys = await run("readonly", (s) => reqP(s.getAllKeys())); return { keys: keys.filter((x) => String(x).startsWith(prefix)) }; },
+  };
+})();
+
+/* ============================ THEME ============================ */
+const ROSE = "#9E3D5E", ROSE_DK = "#6F2B43", GOLD = "#B08D57";
+const INK = "#2A2024", CREAM = "#FBF7F4", CARD = "#FFFFFF", LINE = "#EDE2DB";
+const MUTE = "#8A7C75";
+
+const STATUS = [
+  { k: "เตรียมข้อมูล", c: "#9CA3AF", bg: "#F1F1F2" },
+  { k: "รอ Creative", c: "#B07F1A", bg: "#FBF1D9" },
+  { k: "รอ แคปชั่น", c: "#B07F1A", bg: "#FBF1D9" },
+  { k: "รอ Approve", c: "#C77F0A", bg: "#FCEBCF" },
+  { k: "แคปชั่น OK", c: "#2E6FB0", bg: "#DEEAF6" },
+  { k: "พร้อมโพสต์", c: "#2E6FB0", bg: "#DEEAF6" },
+  { k: "โพสต์เรียบร้อย", c: "#3F7D34", bg: "#E2EFDA" },
+  { k: "ยกเลิก", c: "#C0392B", bg: "#FBE3E0" },
+];
+const STATUS_MAP = Object.fromEntries(STATUS.map((s) => [s.k, s]));
+const DONE = "โพสต์เรียบร้อย", CANCEL = "ยกเลิก", APPROVE_WAIT = "รอ Approve";
+const PRE_POST = ["แคปชั่น OK", "พร้อมโพสต์"]; // should have QC done
+
+const PILLARS = ["โปรโมชั่น", "ให้ความรู้/บทความ", "รีวิว/เคสจริง", "วิดีโอ", "อินฟลูเอนเซอร์", "กิจกรรม/แบรนด์", "ข่าวสาร"];
+const FORMATS = ["Single Banner", "Album", "Full Video", "Short VDO", "Story", "Reels", "Article", "Live"];
+const BRANCHES = ["เว็บหลัก", "พัทยา", "โคราช", "ทุกสาขา", "สาขาอื่น"];
+const PLATFORMS = ["Facebook", "Instagram", "TikTok", "LINE OA", "YouTube"];
+const PILLAR_COLORS = ["#9E3D5E", "#B08D57", "#2E6FB0", "#3F7D34", "#7B5EA7", "#C97B3E", "#5E8C8A"];
+const QC_ITEMS = [
+  { key: "caption", label: "แคปชั่นตรวจแล้ว" },
+  { key: "price", label: "ราคา / โปรถูกต้อง" },
+  { key: "branch", label: "แท็ก / สาขาถูกต้อง" },
+  { key: "link", label: "ลิงก์ใช้งานได้" },
+  { key: "image", label: "รูป / วิดีโอถูกต้อง" },
+];
+const STORE_KEY = "wandee:content:v2";
+const MEDIA_KEY = (id) => `wandee:media:${id}`;
+
+/* ============================ HELPERS ============================ */
+const baht = (n) => "฿" + (n || 0).toLocaleString("th-TH");
+const num = (n) => (n || 0).toLocaleString("th-TH");
+const monthKey = (d) => (d ? d.slice(0, 7) : "");
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const nowISO = () => new Date().toISOString();
+const monthLabel = (mk) => {
+  if (!mk) return "";
+  const [y, m] = mk.split("-");
+  const names = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  return `${names[+m]} ${(+y + 543) % 100}`;
+};
+const fmtDate = (d) => { if (!d) return ""; const [y, m, dd] = d.split("-"); return `${+dd}/${+m}/${(+y + 543) % 100}`; };
+const fmtDT = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+const isOverdue = (c) => c.due && c.due < todayISO() && c.status !== DONE && c.status !== CANCEL;
+const daysTo = (d) => Math.round((new Date(d) - new Date(todayISO())) / 86400000);
+const qcDone = (c) => QC_ITEMS.filter((q) => c.qc?.[q.key]).length;
+const qcFull = (c) => qcDone(c) === QC_ITEMS.length;
+const engRate = (c) => (c.reach > 0 ? c.eng / c.reach : 0);
+const costPerK = (c) => (c.reach > 0 ? (c.spent / c.reach) * 1000 : 0);
+
+let _id = 1;
+function mk(o = {}) {
+  return normalize({ id: `c${Date.now()}_${_id++}`, ...o });
+}
+function normalize(o) {
+  return {
+    id: o.id, date: o.date || "", actualDate: o.actualDate || "", branch: o.branch || "",
+    pillar: o.pillar || "", format: o.format || "", topic: o.topic || "",
+    graphic: o.graphic || "", caption: o.caption || "", start: o.start || "", due: o.due || "",
+    status: o.status || "เตรียมข้อมูล", platforms: o.platforms || [],
+    budget: +o.budget || 0, spent: +o.spent || 0, reach: +o.reach || 0, eng: +o.eng || 0,
+    briefLink: o.briefLink || o.media || "", videos: o.videos || [],
+    briefCount: o.briefCount || 0, finalCount: o.finalCount || 0,
+    qc: o.qc || { caption: false, price: false, branch: false, link: false, image: false },
+    approvedBy: o.approvedBy || "", approvedAt: o.approvedAt || "",
+    comments: o.comments || [], log: o.log || [], note: o.note || "",
+  };
+}
+
+/* media storage */
+async function loadMedia(id) {
+  try { const r = await window.storage.get(MEDIA_KEY(id)); return r && r.value ? JSON.parse(r.value) : { brief: [], final: [] }; }
+  catch { return { brief: [], final: [] }; }
+}
+async function saveMedia(id, m) {
+  try {
+    const json = JSON.stringify(m);
+    if (json.length > 4800000) return { ok: false, reason: "size" };
+    await window.storage.set(MEDIA_KEY(id), json);
+    return { ok: true };
+  } catch { return { ok: false, reason: "error" }; }
+}
+async function deleteMedia(id) { try { await window.storage.delete(MEDIA_KEY(id)); } catch {} }
+function compressImage(file, maxDim = 1100, q = 0.72) {
+  return new Promise((res, rej) => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDim) { height = (height * maxDim) / width; width = maxDim; }
+      else if (height > maxDim) { width = (width * maxDim) / height; height = maxDim; }
+      const cv = document.createElement("canvas"); cv.width = width; cv.height = height;
+      cv.getContext("2d").drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url); res(cv.toDataURL("image/jpeg", q));
+    };
+    img.onerror = rej; img.src = url;
+  });
+}
+
+function useIsDesktop() {
+  const [d, setD] = useState(typeof window !== "undefined" ? window.matchMedia("(min-width:880px)").matches : true);
+  useEffect(() => {
+    const m = window.matchMedia("(min-width:880px)");
+    const h = (e) => setD(e.matches);
+    m.addEventListener("change", h); return () => m.removeEventListener("change", h);
+  }, []);
+  return d;
+}
+
+/* ===== ข้อมูลจริงจากไฟล์ Google Sheet เดิม (นำเข้าอัตโนมัติ) ===== */
+const IMPORT_DATA = [{"date":"2025-10-01","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ผลหวย","graphic":"Nes","caption":"","start":"","due":"","status":"โพสต์เรียบร้อย","note":""},{"date":"2025-10-01","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"VDOสั้น ไอซ์ ฟิลเลอร์คาง ลงเพจ+TT","graphic":"Bam","caption":"JEL","start":"","due":"2025-09-30","status":"แคปชั่น OK","note":""},{"date":"2025-10-01","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Bo ลดกราม 2500.-","graphic":"Nick","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-01","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Hifu 250 Shot 3900.-","graphic":"Nes","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Meso ลดฝ้า 900","graphic":"Bell","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-02","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.มินตี้ Hifu ลงTT","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-02","status":"แคปชั่น OK","note":""},{"date":"2025-10-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปร สเปเชียล บิวตี้","graphic":"Bell","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ราคานวดไทย \\*ด่วน","graphic":"Bell","caption":"","start":"","due":"2025-10-02","status":"แคปชั่น OK","note":""},{"date":"2025-10-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"8 ประโยชน์การนวดไทย","graphic":"Bell","caption":"","start":"","due":"2025-10-02","status":"แคปชั่น OK","note":""},{"date":"2025-10-03","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Drip ผิวออร่า (สลากส้ม ขวดขาว) 900.-","graphic":"Kan","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-03","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Bo ริ้วรอยหน้าผาก 2500.-","graphic":"Kan","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-03","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรรวมฟิลเลอร์ สวยเต็ม10","graphic":"Bell","caption":"JOY","start":"","due":"","status":"แคปชั่น OK","note":""},{"date":"2025-10-03","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"VDOสั้น เอ็กซ์ หน้าใส ลงเพจ+ TT","graphic":"Bam","caption":"JEL","start":"","due":"2025-09-30","status":"รอ แคปชั่น","note":""},{"date":"2025-10-04","branch":"","pillar":"กิจกรรม/แบรนด์","format":"Single Banner","topic":"วันเกิดพนักงานเดือนสิงหาคม โพสต์วันดีทีม / HR","graphic":"","caption":"JOY","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-04","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Fat เหมาขวด 2500.- รอเปลี่ยนรูป","graphic":"Nes","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"2025-10-04","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ประจำWeek 1 /รูปบรรยากาศ","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-03","status":"รอ Creative","note":""},{"date":"2025-10-04","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุด น้องธันย่า ฟล.ปาก + ถือกล่องxspurt (ใช้รูปถือกล่อง ขอเห็นกล่องชัดๆ) \\*ด่วนนนน","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-03","status":"แคปชั่น OK","note":""},{"date":"2025-10-04","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.พี่จอยหน้าร้าน ฟิลเลอร์ใต้ตาลงเพจ+TT","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-03","status":"รอ แคปชั่น","note":""},{"date":"2025-10-05","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.จอยลูกค้า Filler หน้าผาก","graphic":"Kan","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"2025-10-05","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.เค้ก Ultraformer","graphic":"Bell","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"2025-10-05","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.ธันย่า ดริปผิว D2+ ลงTT","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-03","status":"รอ แคปชั่น","note":""},{"date":"2025-10-06","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"Shot time โปรประจำเดือน","graphic":"Nes","caption":"JOY","start":"","due":"2025-10-04","status":"รอ แคปชั่น","note":""},{"date":"2025-10-06","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"K.มิ้ง โบริ้้วรอย","graphic":"Nick","caption":"JEL","start":"","due":"2025-09-16","status":"รอ แคปชั่น","note":""},{"date":"2025-10-06","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม K.ขวัญ Ultarformer","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-05","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-07","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"VDO.คอนเทนต์เซลล์โปรประจำเดือน ลงเพจ/TT","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-08","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.อ้อม ฟิลเลอร์หน้าผาก","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-09","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม รวมฟิลเลอร์ปรับรูปหน้า","graphic":"Kan","caption":"Bam","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-10","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.นาน่า ฟิลเลอร์คาง","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-09","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-11","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"ประจำWeek 2 / VDO.บรรยากาศ","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-10","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-11","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.เบนซ์ Oligio ลงTT","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-10","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-12","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.CEO","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-11","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-13","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.เพลงขิม ฟิลเลอร์ปาก","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-12","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-14","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.เก้ากี้ ฟิลเลอร์ใต้ตา","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-13","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-15","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม เปิดตัวนครพนม","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-14","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-16","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.แยมฟิลเลอร์ปาก","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-15","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-16","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ผลหวย","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-16","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-17","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.CEO","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-16","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-18","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ประจำWeek 3 / รูปเช็คแท้","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-17","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-18","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO. หมอบอม ให้ความรู้ ลงตต","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-17","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-19","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.รวมวิตามิน","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-18","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-20","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.เรฟปากเรฟนี้จะรอดไหม?","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-19","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-21","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.ฟิลเลอร์","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-20","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-22","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.CEO","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-21","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-23","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม รวมหมอเทรนด์อัพสกิล","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-22","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-24","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO. 3สิ่งหัตถการบนใบหน้ารู้งี้ทำนานแล้ว","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-23","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-24","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"7 วันสุดท้าย โปรประจำเดือน","graphic":"Nes","caption":"JOY","start":"","due":"2025-10-23","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-25","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.ป๊อปโบริ้วรอย","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-24","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-25","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ประจำWeek 4 / รูปบรรยากาศ","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-24","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-26","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.ฟิลเลอร์","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-25","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-27","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.โบกราม","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-26","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-28","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.CEO","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-27","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-29","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.Oligio","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-28","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-30","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม รวมหมอเทรนด์อัพสกิล","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-29","status":"เตรียมข้อมูล","note":""},{"date":"2025-10-31","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.ฟิลเลอร์","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-30","status":"เตรียมข้อมูล","note":""},{"date":"2025-11-01","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"ประจำWeek 4 / VDO.เช็คแท้","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-31","status":"เตรียมข้อมูล","note":""},{"date":"2025-11-02","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.แมงปอดริปผิว D5+","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-31","status":"เตรียมข้อมูล","note":""},{"date":"2026-03-19","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รวมเคส อัลตร้าฟอร์เมอร์ Week3","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"2026-03-26","branch":"","pillar":"อินฟลูเอนเซอร์","format":"Single Banner","topic":"รวมอินฟลู ฟิลเลอร์ปากสวย 2026 Week4","graphic":"","caption":"JEL","start":"","due":"","status":"รอ Creative","note":""},{"date":"2026-04-04","branch":"","pillar":"กิจกรรม/แบรนด์","format":"Single Banner","topic":"วันเกิดพนักงานเดือนมีนาคม โพสต์วันดีทีม / HR","graphic":"JOY","caption":"JOY","start":"","due":"2026-05-04","status":"เตรียมข้อมูล","note":""},{"date":"2026-05-06","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"Shotime โปรประจำเดือน","graphic":"Bell","caption":"JEL","start":"2026-06-02","due":"2026-06-04","status":"รอ Creative","note":""},{"date":"2026-05-07","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม K.หมออีฟ หัตถการที่ทำแล้วคุ้มค่า","graphic":"Ploy","caption":"JEL","start":"2026-05-29","due":"2026-06-01","status":"เตรียมข้อมูล","note":""},{"date":"2026-06-01","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Laser รักแร้ 2ครั้ง 666 โพสต์ 11.00น.","graphic":"Bell","caption":"JEL","start":"2026-05-27","due":"2026-05-27","status":"รอ แคปชั่น","note":""},{"date":"2026-06-01","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.พี่มิ้งแชร์หัตถการผู้ชาย 30+ โพสต์ 15.00น.","graphic":"Ploy","caption":"MAX","start":"2026-05-23","due":"2026-05-25","status":"รอ แคปชั่น","note":""},{"date":"2026-06-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Meso ฝ้ากระ 666","graphic":"Bell","caption":"JEL","start":"2026-05-27","due":"2026-05-27","status":"รอ แคปชั่น","note":""},{"date":"2026-06-02","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Dripผิว100ml 1ครั้ง 666","graphic":"Fah","caption":"JEL","start":"2026-05-27","due":"2026-05-27","status":"รอ Approve","note":""},{"date":"2026-06-03","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม K.พิม โบริ้วรอย+โบกราม","graphic":"Ploy","caption":"JEL","start":"2026-05-26","due":"2026-05-28","status":"รอ แคปชั่น","note":""},{"date":"2026-06-04","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Bo ð°ð· ลดกราม +หน้าใส 2,666","graphic":"Fah","caption":"JEL","start":"2026-05-27","due":"2026-05-27","status":"รอ แคปชั่น","note":""},{"date":"2026-06-04","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Boð°ð· ริ้วรอยทั่วหน้า +หน้าใส 2666","graphic":"Bell","caption":"JEL","start":"2026-05-28","due":"2026-05-28","status":"รอ แคปชั่น","note":""},{"date":"2026-06-05","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"Shot time ฟิลเลอร์ 2 CC คุณเนส","graphic":"Bell","caption":"JEL","start":"2026-05-25","due":"2026-05-26","status":"รอ แคปชั่น","note":""},{"date":"2026-06-08","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก Ultra former lll. 250 ช็อต 3666","graphic":"Fah","caption":"JEL","start":"2026-05-28","due":"2026-05-28","status":"รอ Approve","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ปกเพจโปรประจำเดือน","graphic":"Bell","caption":"","start":"","due":"","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"เปรียบเทียบ Ulthera vs Ultraformer แบบละเอียดก่อนตัดสินใจ (เว็บสาขาโคราช)","graphic":"","caption":"","start":"","due":"2026-02-23","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Wegovy ต่างจากยาลดน้ำหนักทั่วไปอย่างไร (เว็บสาขาโคราช)","graphic":"","caption":"","start":"","due":"2026-02-23","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"Juvederm เหมาะกับใครบ้าง ควรรู้อะไรก่อนฉีด (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-23","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Wegovy มีผลข้างเคียงหรือเปล่า (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-24","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Neuramis ฉีดแล้วหน้าเปลี่ยนแค่ไหน (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-24","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"ฟิลเลอร์ Restylane ดีไหม ควรรู้อะไรก่อนฉีด (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-24","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฉีด Nabota ช่วยลดริ้วรอยและปรับหน้าเรียวได้อย่างไร (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-25","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เลือกฉีด Allergan อย่างไรให้ปลอดภัยและเห็นผลดี (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-25","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เปลี่ยนผิวโทรมให้ใส ด้วย Pico (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-25","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Pandora Fat หน้าเรียวขึ้นได้จริงไหม? ใครควรเลี่ยง (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-26","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Ultracol ช่วยยกกระชับผิวได้จริงแค่ไหน (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-26","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Theraset ต้องทำกี่ครั้งถึงเห็นผล (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-27","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ร้อยไหม ต่างจากการยกหน้าแบบอื่นอย่างไร (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-27","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฉีด NeoClear ช่วยเรื่องสิว ผิวหมองได้อย่างไร (เว็บสาขาพัทยา)","graphic":"","caption":"","start":"","due":"2026-02-27","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Juvederm อยู่ได้นานแค่ไหน คุ้มไหม (เว็บสาขา)","graphic":"","caption":"","start":"","due":"2026-03-06","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Restylane เจ็บไหม หลังฉีดต้องพักฟื้นหรือไม่ (เว็บสาขา)","graphic":"","caption":"","start":"","due":"2026-03-07","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ประโยชน์ของการนวดแผนไทย ขอนแก่น (ปกร้านนวด)","graphic":"","caption":"","start":"","due":"2026-03-09","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"นวดเท้า ขอนแก่น ดีอย่างไร? พร้อม 5 ประโยชน์ ที่ควรรู้ (ปกร้านนวด)","graphic":"","caption":"","start":"","due":"2026-03-16","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ความแตกต่างของ นวดไทย vs สปา เลือกแบบไหนดีกว่ากัน (ปกร้านนวด)","graphic":"","caption":"","start":"","due":"2026-03-23","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"เปรียบเทียบ Revolax ต่างจากฟิลเลอร์ยี่ห้ออื่นอย่างไร (เว็บสาขา kk) \\*ด่วน","graphic":"","caption":"","start":"","due":"2026-03-25","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"ควรรู้อะไรก่อนฉีดฟิลเลอร์ Revolax (เว็บสาขา pty) \\*ด่วน","graphic":"","caption":"","start":"","due":"2026-03-25","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฟิลเลอร์ Revolax ให้ผลลัพธ์ดูเป็นธรรมชาติจริงไหม (เว็บสาขา nma) \\*ด่วน","graphic":"","caption":"","start":"","due":"2026-03-26","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"หน้าปกเว็บไซต์ หมอ + Call to Action \\*ด่วน","graphic":"","caption":"บรีฟ","start":"","due":"2026-03-28","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิกเสริมความงาม ชัยภูมิ ที่มีชื่อเสียง (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-09","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก เสริมจมูก กาญจนบุรี สุดปัง\\! (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-09","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"นวดคลายเส้น ขอนแก่น ตัวช่วยแก้ปวดเมื่อย พร้อมประโยชน์ที่ควรรู้ (ปกร้านนวด)","graphic":"","caption":"","start":"","due":"2026-04-09","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ทำตา 2 ชั้น กาญจนบุรี ที่ได้รับความไว้วางใจ (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-10","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดผิวขาว กาญจนบุรี ผิวเนียนใส มีออร่า (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-10","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดฟิลเลอร์ ระยอง เติมเต็มความสวย ละมุน (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-18","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดฟิลเลอร์ บางใหญ่ สำหรับคนในพื้นที่ (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-18","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"แนะนำ 5 คลินิกเสริมความงาม กาญจนบุรี ที่มีรีวิวเยอะ (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดฟิลเลอร์ เชียงราย ราคาจับต้องได้ (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดโบท็อกซ์ เชียงราย ที่ปังที่สุด\\! (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-22","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดโบท็อกซ์ ระยอง ยอดนิยม (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-04-22","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"ฟิลเลอร์ปาก คืออะไร? รวมทุกเรื่องที่ต้องรู้ 2026 (เว็บwd)","graphic":"","caption":"","start":"","due":"2026-04-22","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ออฟฟิศซินโดรม รักษาหายไหม? สาเหตุเกิดจากอะไร (ร้านนวด)","graphic":"","caption":"","start":"","due":"2026-04-23","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฟิลเลอร์ปาก อยู่ได้นานไหม? (เว็บหลัก)","graphic":"","caption":"","start":"","due":"2026-04-23","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"wegovy อุดร ตัวช่วยคุมหิวได้จริงไหม มีผลข้างเคียงอะไรบ้าง? (ปกอุดร)","graphic":"","caption":"","start":"","due":"2026-05-07","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"wegovy ร้อยเอ็ด นวัตกรรมใหม่ที่จะช่วยคุมหิว ใช้อย่างไรให้ถูกวิธี (ปกร้อยเอ็ด)","graphic":"","caption":"","start":"","due":"2026-05-08","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"wegovy นครพนม อันตรายไหม? รวมทุกข้อควรรู้ก่อนทำ (ปกนครพนม)","graphic":"","caption":"","start":"","due":"2026-05-09","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"รวมข้อควรรู้\\! wegovy สกลนคร พร้อมวิธีเลือกคลินิก (ปกนครสกล)","graphic":"","caption":"","start":"","due":"2026-05-09","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดหน้าใส อุดร เผยผิวหน้าใส ไม่พัง\\! (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-05-20","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ Teoxane Filler ต่างจากฟิลเลอร์ทั่วไปอย่างไร","graphic":"","caption":"","start":"","due":"1969-05-12","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ภาพ ADS ฟีเจอร์ Plan (easy) 2 Package - ภาพ 2 ขนาด","graphic":"","caption":"","start":"","due":"1969-05-16","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ภาพปกเว็บ Easy Clinic","graphic":"","caption":"","start":"","due":"2026-05-19","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"Facelift รวมวิธีแก้หน้าหย่อนคล้อยแบบไม่ผ่าตัด (เว็บหลัก)","graphic":"","caption":"","start":"","due":"2026-05-20","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก เลเซอร์ นครพนม ผิวเนียนใส ไร้ขน (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-05-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ร้อยไหม นครพนม ที่มีชื่อเสียง (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-05-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดฟิลเลอร์ใต้ตา สกลนคร ที่ปลอดภัย (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-05-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แนะนำ 5 คลินิก ฉีดสิว สกลนคร ยอดนิมยม (ปกtop5)","graphic":"","caption":"","start":"","due":"2026-05-21","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม ทริปเที่ยวประจำปี At เวียดนาม","graphic":"1/5/69","caption":"JEL","start":"","due":"2026-05-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.4 เทรนพนักงาน จาก Galderma เรทตีเรน+สกาวต้า","graphic":"1/5/69","caption":"JEL","start":"","due":"2026-05-02","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยกนครพนม ตรีมใหม่","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ป้ายสแตนดี้ แคมเปญ 2 ป้าย รอออกแบบ ใช้ออกตลาด","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.หมอดาด้า ฟิลเลอร์ปากต้องใช้กี่ CC","graphic":"5/5/69","caption":"JEL","start":"","due":"2026-05-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO. เที่ยวเวียดนาม ลงช่องพี่เฟิร์น","graphic":"7/5/69","caption":"JEL","start":"","due":"2026-05-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.ปังปอนด์ โบกราม+แฟต","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รวมเคสผลงงานวันดีคลินิก แอด แคมเปญ","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรโมชั่น Fillstim เฉพาะจุด 1,890 1 ขวด 5ml 5,900","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวลูกค้า เช็กผลิตภัณฑ์ Nabo จากบริษัทผู้แทนยา","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ช็อตไทม์ โบริ้วรอย","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม K.ปังปอนด์ โบ+แฟต แบบที่ 2 ลงคลินิกเราเอง","graphic":"20/3/69","caption":"JEL","start":"","due":"2026-03-26","status":"รอ Approve","note":"FALSE"},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"อยากทำหน้าที่ วันดี แต่กลัวเข็ม ทำอะไรได้บ้าง?","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO. พี่เฟิร์น เติมโบ","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"สาวออฟฟิศฟังทางนี้ ใช้รูปกี้เก้า เจาะกลุ่มเจนวาย","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"แอดปากกา ให้ความรู้ ข้อดีของคนที่หุ่นเพียว","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แอดโปร กระชับ น้องสาว ของพัทยา","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"วัยป้า ทำหน้ายังไงได้บ้าง? เจาะกลุ่มเจน X เน้นแนะนำ","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมบรรยากาศลูกค้า ร้านนวด","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"K.ชมพู่ Pico Duo หน้าใส +หลุมสิว","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวม BO ที่ลูกค้าบอกต่อ ว่าตึงตั้งแต่วันแรก ใช้ Hutox Beinox Nabota","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฟิลเลอร์ปากสายฝอ สายฝอถูกใจสิ่งนี้","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เทียบปากชัดๆ ครีมมี่","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"หุ่นใหม่ที่ชั้นใฝ่ฝัน","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แอดผ่อนจมูกสวย ด้วย Spay","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"คอนเท้น คลินิกสีชมพูแห่งนึง ใน….","graphic":"","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.พิม โบริ้วรอย","graphic":"Fah","caption":"","start":"2026-05-25","due":"2026-05-25","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว พี่จ๋า ฟิลเลอร์ปาก","graphic":"Fah","caption":"","start":"2026-05-26","due":"2026-05-26","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.เบนซ์ Oligio","graphic":"Fah","caption":"","start":"2026-05-23","due":"2026-05-23","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"Shot time K.ฟ้า ฟิลเลอร์ปาก","graphic":"Bell","caption":"","start":"2026-05-21","due":"2026-05-22","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Short VDO","topic":"Shot VDO.K.เอมมี่ฟิลเลอร์ใต้ตา","graphic":"Kan","caption":"","start":"2026-05-21","due":"2026-05-22","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"วิดีโอ","format":"Full Video","topic":"VDO.เต็ม K.โบว์ อัลตร้าฟอร์เมอร์","graphic":"Kan","caption":"","start":"2026-05-23","due":"2026-05-26","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Short VDO","topic":"Shot VDO. พี่แพร วันดีคลินิก มีโปรแกรมรักษาหลุมสิวมั้ย","graphic":"Ploy","caption":"","start":"","due":"2026-05-14","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมฟิลเลอร์ 2CC 4ตัว","graphic":"Bell","caption":"","start":"","due":"2026-04-28","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"กติกาการเข้าร่วมแคมเปญเมคโอเวอร์","graphic":"Bell","caption":"","start":"","due":"2026-05-08","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมเงื่อนไข แคมเปญเมคโอเวอร์","graphic":"Bell","caption":"","start":"","due":"2026-05-08","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Column 2","graphic":"Bell","caption":"Column 3","start":"","due":"","status":"ยกเลิก","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รับสมัครเซลล์พัทยา \\*ด่วน","graphic":"Bell","caption":"","start":"","due":"","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"นวดแผนไทย VS นวดไทยยาหม่อง","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-04","status":"รอ Creative","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"K.เนส โปรแกรมดริปผิว สูตร D2+","graphic":"Nick","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.โบว์ Oligio","graphic":"Nick","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Fat ไดมอน","graphic":"กราฟิกนอก","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Nabo 3500","graphic":"กราฟิกนอก","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"สกาวต้า รอเปลี่ยนราคา","graphic":"กราฟิกนอก","caption":"JEL","start":"","due":"","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ไวนิล Wandee massage","graphic":"Bell","caption":"","start":"","due":"2025-10-03","status":"โพสต์เรียบร้อย","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมทรงจมูกยอดฮิต 2025","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-01","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวฟิลเลอร์ เนส+จอย(พี่เฟิร์นสั่ง) รอแก้","graphic":"Nes","caption":"","start":"","due":"","status":"รอ Approve","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รวมเคสปัง ฟิลเลอร์ใต้ตา น้องธันย่า+น้องจูเนียร์+พี่จอย","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-01","status":"รอ Creative","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.แยม ฟิลเลอร์ปาก","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-02","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แอด ฟิลเลอร์ xspurt 3990 +ของแถมเลือกได้ \\*\\*\\*\\*\\*เจลบรีฟ","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-02","status":"รอ Creative","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"แอด ฟิลเลอร์คลินาบอมเกาหลี 3990 +ของแถมเลือกได้ \\*\\*\\*\\*\\*เจลบรีฟ","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รีวิว K.แบม+ราคา","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ชั้นตาแบบสายเกา VS สายฝอ ต่างกันยังไง?","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุด น้องธันย่า ฟล.ปาก + ถือกล่องxspurt (ใช้รูปกล่องจริงไม่ต้องแต่ง) ของแอดมิน","graphic":"Nes","caption":"","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.มีน ฟิลเลอร์ร่องแก้ม (ใช้รูปถือกล่อง ) \\*ด่วนนนนน","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.มีน ฟิลเลอร์ร่องแก้ม (ใช้รูปกล่องจริงไม่ต้องแต่ง) ของแอดมิน","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-03","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ราคาโบ Hutox \\*ด่วนนน","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.เก้ากี้ ฟิลเลอร์ขมับ หน้าแก้ม ใต้ตา","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบคุณเอล ฟิลเลอร์ใต้ตา","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"พิกัดวันดีคลินิก 3 สาขา ขอร้อยเอ็ดก่อน อุดร โคราช \\*\\*\\*\\*ด่วน (ขอก่อนวันที่ 7)","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"พิกัดวันดีคลินิก 3 สาขา ขอนครพนมก่อน หอกาญ พัทยา \\*\\*\\*\\*ด่วน (ขอก่อนวันที่ 7)","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เทียบ Biostimulator \\*พี่เฟิร์นสั่ง","graphic":"Nes","caption":"JOY","start":"","due":"2025-10-04","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เตรียมข้อมูล","graphic":"Bell","caption":"เรฟ","start":"2025-10-05","due":"","status":"ยกเลิก","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เปิดตัว Youthfill Filler","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-05","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.เน่เน่ ฟิลเลอร์หน้าผาก","graphic":"Kan","caption":"JEL","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุดลูกค้า K.แกง พาขวัญ nabo","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.ต้อม fillerขมับ+แก้มตอบ","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบเคสเรียลๆ +ปก \\*พี่มิ้งสั่ง รอเพิ่มปก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-06","status":"รอ แคปชั่น","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบเรียลๆ ลูกค้า สกาวต้า","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ชั้นตาแบบไหนที่ทำให้หน้าดูเด็กลง?","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ทรงจมูก Natural สวยละมุน ใครก็ทำได้","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-06","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฉลองเปิดตัวสาขานครพนม","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.พิมพ์ ฟิลเลอร์ปาก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมฟิลเลอร์ปาก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เคล็ดลับดูแลหลังทำตาสองชั้น","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-07","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมราคาไซส์โบท็อก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.พลอย อัลตร้าฟอร์เมอร์","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.ครีมฟิลเลอร์ปาก","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว คุณแบงค์ เมโสหน้าใส","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุดคุณนาน่าฟิลเลอร์คาง","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-08","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.ทราย ลดฟ้ากระ","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-09","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.หญิง ฟิลเลอร์ขมับ แก้มตอบ ปาก","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-09","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวสาขาพัทยา \\*เจลบรีฟ","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-09","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"ให้ความรู้/บทความ","format":"Single Banner","topic":"ทำไมฟิลเลอร์ต้องที่ Wandee ใช้รูปโล่","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-10","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.นัท ฟิลเลอร์ใต้ตา","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-10","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"พัทยา งานพลุ รอบรีฟ","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-11","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบฟิลเลอร์ปาก บอกจุดเติม","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-11","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบคุณญาญ่า ขมับ+แก้มตอบ+คาง 12CC","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-11","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.เนส ฟิลเลอร์ขมับ+แก้มตอบ","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-12","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.ต่าย Filler EPTQปาก1cc+ร่องแก้ม2cc","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-12","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุด คุณไอซ์ ฟิลเลอร์คาง+จอไลน์ \\*รอรูปสวย","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-12","status":"รอ Creative","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุด พี่จ๋า กราม,ริ้วรอย Hutox","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-13","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.มีน ฟิลเลอร์ร่องแก้ม","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-13","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมเทรนด์จมูกมาแรงในไทย ปี 2025","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-13","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ทำตาสองชั้นเจ็บไหม? ใช้เวลากี่วันหาย?","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-13","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ฟิลเลอร์ 3 CC 10,000 ฉีดจุดไหนได้บ้าง","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-14","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.นิวเยียร์ โบกราม+ลิฟกรอบหน้า","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-14","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.ป๊อปปี้ Oligio","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-14","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ราคาทรงจมูกยอดฮิต วันดี","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-14","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.เอ็กซ์สึ หน้าใส+ดริปวิตามิน 1D+","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-15","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.ไอซ์ ฟิลเลอร์คาง","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-15","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รีวิว K.อ้อน โปรแกรม FAT","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-15","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบธันย่า ฟิลเลอร์ปาก+ใต้ตา","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-15","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวเรียลๆ แชท ลูกค้า K.มินตี้ หน้าใส","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-16","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"คุณอ้อมฟิลเลอร์หน้าผาก สไตล์ Lemon8","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-16","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว พี่รัตน์ BO ริ้วรอย","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-16","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรขายดี จากโปรประจำเดือน ตรีมฮาโลวีน","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-17","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวสาขาอุดร","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-17","status":"รอ Creative","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปเทียบ จ๋อมแจ๋ม ฟิลเลอร์","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-18","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.นิวเยียร์ Bo ลดกราม เริ่มเห็นผลลัพธ์ช่วงไหน","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-18","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"Fat Body 3 ระยะ","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-18","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"shot time filler ปาก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-18","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รวมเคสลููกค้าฟิลเลอร์ปาก","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-19","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รวมเคสลูกค้าฟิลเลอร์หน้าผาก","graphic":"Bell","caption":"JEL","start":"","due":"2025-10-19","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ซิลิโคนมีกี่แบบ ต่างกันยังไง?","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-20","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว จูเนียร์ฟิลเลอร์ใต้ตา","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-20","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"คอนเทนหมอมะปราง","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-20","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ราคาตา 2 ชั้น","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-20","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รวมราคาซิลิโคนจมูก วันดี","graphic":"Sania","caption":"JOY","start":"","due":"2025-10-21","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวK.ของขวัญ อัลตร้าฟอร์เมอร์","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-21","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรประจำเดือน พ.ย.","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-21","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"งานไหม ขอนแก่น รอบรีฟ","graphic":"Nes","caption":"JEL","start":"","due":"2025-10-24","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ปกโปรประจำเดือน พ.ย.","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-23","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแยก","graphic":"Bell","caption":"JOY","start":"","due":"2025-10-23","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ทรงตา 2 ชั้น ยอดฮิต วันดี","graphic":"Sania","caption":"JEL","start":"","due":"2025-10-27","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"เลือกทรงจมูกยังไง ให้เข้ากับใบหน้า","graphic":"Sania","caption":"JEL","start":"","due":"2025-10-27","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"ตาสองชั้นแบบไหนทำให้ตาดูโตขึ้นจริง?","graphic":"Sania","caption":"JEL","start":"","due":"2025-10-28","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รีวิว K.ตัวเล็ก โปรแกรม Ultraformer III","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.เจลลี่ ฟิลเลอร์ร่องแก้ม","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"โปรแกรมฟิลเลอร์+รูปเทียบ","graphic":"Nes","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.นิวเยียร์ โบกราม+ลิฟกรอบหน้า รอแก้ งานพี่นิก","graphic":"Nes","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"หมอเป้ เทรน Oligio","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.ป๊อป โบริ้วรอย","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิวน้องธันย่า+น้องใบเตย เพื่อนสาวพากันทำสวย แนว Lemon8 แก้ใหม่","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.มินตี้ Meso l'ebss","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รีวิว K.แมงปอ ฟิลเลอร์ขมับ + แก้มตอบ","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"โปรโมชั่น","format":"Single Banner","topic":"รูปชุด k.นุ่น UltraV ขมับ2ccแก้มตอบ3cc \\*รูปไม่ค่อยเริ่ดเท่าไหร่","graphic":"Nes","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.น้ำ Drip vitamin D2+","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปเทียบ K.ทราย Filler ใต้ตา หน้าแก้ม","graphic":"Nes","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""},{"date":"","branch":"","pillar":"รีวิว/เคสจริง","format":"Single Banner","topic":"รูปชุด K.เขต Ultraformer","graphic":"Bell","caption":"JEL","start":"","due":"","status":"เตรียมข้อมูล","note":""}];
+const seed = () => IMPORT_DATA.map(mk);
+
+/* ============================ APP ============================ */
+function App() {
+  const isDesktop = useIsDesktop();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState("dash");
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(STORE_KEY);
+        if (r && r.value) setItems(JSON.parse(r.value).map(normalize));
+        else setItems(seed());
+      } catch { setItems(seed()); }
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setItems(next); setSaving(true);
+    try { await window.storage.set(STORE_KEY, JSON.stringify(next)); } catch {}
+    setTimeout(() => setSaving(false), 500);
+  }, []);
+
+  const addLog = (c, text) => ({ ...c, log: [{ at: nowISO(), text }, ...(c.log || [])].slice(0, 30) });
+
+  const upsert = async (item, media, meta) => {
+    const prev = items.find((i) => i.id === item.id);
+    const isNew = !prev;
+    if (media) {
+      const res = await saveMedia(item.id, media);
+      if (!res.ok) {
+        alert(res.reason === "size"
+          ? "บันทึกรูปไม่สำเร็จ: รูปมีขนาดรวมใหญ่เกินไป\nลองลดจำนวนรูป หรือเลือกรูปที่เล็กลง"
+          : "บันทึกรูปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+      }
+      item = { ...item, briefCount: media.brief.length, finalCount: media.final.length };
+    }
+    if (isNew) item = addLog(item, "สร้างคอนเทนต์");
+    if (!isNew && meta?.dueChangeReason) {
+      item = addLog(item, `เปลี่ยนวันส่งงาน ${fmtDate(meta.oldDue)} → ${fmtDate(item.due)} · เหตุผล: ${meta.dueChangeReason}`);
+    }
+    persist(isNew ? [...items, item] : items.map((i) => (i.id === item.id ? item : i)));
+    setEditing(null);
+    setViewing((v) => (v && v.id === item.id ? item : v));
+  };
+  const remove = (id) => { deleteMedia(id); persist(items.filter((i) => i.id !== id)); setViewing(null); };
+  const patch = (id, fn, logText) => {
+    const next = items.map((i) => {
+      if (i.id !== id) return i;
+      let u = fn(i);
+      if (logText) u = addLog(u, logText);
+      return u;
+    });
+    persist(next);
+    setViewing((v) => (v && v.id === id ? next.find((x) => x.id === id) : v));
+  };
+  const setStatus = (id, status) => patch(id, (i) => ({ ...i, status }), `เปลี่ยนสถานะ → ${status}`);
+
+  /* derived */
+  const stats = useMemo(() => {
+    const active = items.filter((i) => i.status !== CANCEL);
+    const done = items.filter((i) => i.status === DONE).length;
+    const budget = items.reduce((s, i) => s + i.budget, 0);
+    const spent = items.reduce((s, i) => s + i.spent, 0);
+    return {
+      total: items.length, done, inprog: active.length - done,
+      completion: active.length ? done / active.length : 0,
+      budget, spent, remain: budget - spent,
+      reach: items.reduce((s, i) => s + i.reach, 0),
+      eng: items.reduce((s, i) => s + i.eng, 0),
+      overdue: items.filter(isOverdue).length,
+      waiting: items.filter((i) => i.status === APPROVE_WAIT).length,
+    };
+  }, [items]);
+
+  const NAV = [
+    ["dash", "ภาพรวม", LayoutDashboard],
+    ["todo", "ต้องจัดการ", Bell],
+    ["plan", "คอนเทนต์", ListChecks],
+    ["cal", "ปฏิทิน", CalendarDays],
+    ["team", "ทีม", Users],
+    ["perf", "ผลงาน", Award],
+  ];
+  const attentionCount = stats.overdue + stats.waiting;
+
+  if (!loaded)
+    return <div style={{ minHeight: "100vh", background: CREAM, display: "grid", placeItems: "center", color: ROSE, fontFamily: "Georgia,serif" }}>กำลังโหลด…</div>;
+
+  const newItem = () => setEditing(mk({ date: todayISO() }));
+
+  return (
+    <div style={{ minHeight: "100vh", background: CREAM, color: INK, fontFamily: "'Trebuchet MS','Leelawadee UI','Sukhumvit Set',sans-serif", display: "flex" }}>
+      <GlobalStyle />
+
+      {/* DESKTOP SIDEBAR */}
+      {isDesktop && (
+        <aside style={{ width: 232, flexShrink: 0, background: `linear-gradient(180deg,${ROSE_DK},${ROSE})`, color: "#fff",
+          position: "sticky", top: 0, height: "100vh", display: "flex", flexDirection: "column", padding: "20px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "0 8px 18px" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: "rgba(255,255,255,.15)", display: "grid", placeItems: "center", border: "1px solid rgba(255,255,255,.25)" }}>
+              <Sparkles size={21} color={GOLD} />
+            </div>
+            <div>
+              <div style={{ fontFamily: "Georgia,serif", fontSize: 18, fontWeight: 700 }}>Wandee</div>
+              <div style={{ fontSize: 11, opacity: .8 }}>Marketing System</div>
+            </div>
+          </div>
+          <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+            {NAV.map(([k, label, Icon]) => (
+              <button key={k} className="btn" onClick={() => setTab(k)}
+                style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 13px", fontSize: 14.5, textAlign: "left",
+                  background: tab === k ? "#fff" : "transparent", color: tab === k ? ROSE_DK : "#fff", borderRadius: 11 }}>
+                <Icon size={18} /> <span style={{ flex: 1 }}>{label}</span>
+                {k === "todo" && attentionCount > 0 && <Pill n={attentionCount} active={tab === k} />}
+              </button>
+            ))}
+          </nav>
+          <button className="btn" onClick={newItem}
+            style={{ background: GOLD, color: "#fff", padding: "12px", fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+            <Plus size={18} /> เพิ่มคอนเทนต์
+          </button>
+          <button className="btn" onClick={() => exportCSV(items)}
+            style={{ background: "rgba(255,255,255,.14)", color: "#fff", padding: "10px", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            <Download size={16} /> ส่งออก Excel/CSV
+          </button>
+          <div style={{ fontSize: 11, opacity: .7, textAlign: "center", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            {saving ? <><Save size={12} /> กำลังบันทึก…</> : <><CheckCircle2 size={12} /> บันทึกอัตโนมัติ</>}
+          </div>
+        </aside>
+      )}
+
+      {/* MAIN */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {/* MOBILE HEADER */}
+        {!isDesktop && (
+          <header style={{ background: `linear-gradient(120deg,${ROSE_DK},${ROSE})`, color: "#fff", padding: "14px 16px",
+            position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", gap: 10 }}>
+            <Sparkles size={20} color={GOLD} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "Georgia,serif", fontSize: 18, fontWeight: 700 }}>Wandee Clinic</div>
+              <div style={{ fontSize: 11, opacity: .82, marginTop: -2 }}>ระบบจัดการ & ตรวจงานการตลาด</div>
+            </div>
+            <button className="btn" onClick={() => exportCSV(items)} style={{ background: "rgba(255,255,255,.16)", color: "#fff", padding: 9 }}><Download size={17} /></button>
+          </header>
+        )}
+
+        <main style={{ maxWidth: 1120, width: "100%", margin: "0 auto", padding: isDesktop ? "26px 28px 60px" : "18px 14px 96px", boxSizing: "border-box", overflowX: "hidden" }}>
+          {tab === "dash" && <Dashboard items={items} stats={stats} go={setTab} onExport={() => exportCSV(items)} isDesktop={isDesktop} />}
+          {tab === "todo" && <NeedsAttention items={items} onView={setViewing} onStatus={setStatus} />}
+          {tab === "plan" && <Plan items={items} onNew={newItem} onView={setViewing} onEdit={setEditing} onDelete={remove} onStatus={setStatus} />}
+          {tab === "cal" && <CalendarView items={items} onView={setViewing} />}
+          {tab === "team" && <Team items={items} />}
+          {tab === "perf" && <Performance items={items} onView={setViewing} />}
+        </main>
+      </div>
+
+      {/* MOBILE BOTTOM NAV */}
+      {!isDesktop && (
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 30, background: "#fff", borderTop: `1px solid ${LINE}`,
+          display: "flex", padding: "6px 4px", boxShadow: "0 -4px 20px rgba(110,43,67,.08)" }}>
+          {NAV.map(([k, label, Icon]) => (
+            <button key={k} className="btn" onClick={() => setTab(k)}
+              style={{ flex: 1, background: "transparent", color: tab === k ? ROSE : "#A89A92", padding: "5px 2px",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 2, position: "relative" }}>
+              <Icon size={20} />
+              <span style={{ fontSize: 9.5, fontWeight: tab === k ? 700 : 500 }}>{label}</span>
+              {k === "todo" && attentionCount > 0 && (
+                <span style={{ position: "absolute", top: 0, right: "50%", marginRight: -22, background: "#C0392B", color: "#fff",
+                  fontSize: 9, fontWeight: 700, minWidth: 15, height: 15, borderRadius: 8, display: "grid", placeItems: "center", padding: "0 3px" }}>{attentionCount}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* FAB (mobile, on list-ish tabs) */}
+      {!isDesktop && ["plan", "todo", "cal", "team", "perf"].includes(tab) && (
+        <button className="btn" onClick={newItem}
+          style={{ position: "fixed", right: 18, bottom: 76, zIndex: 28, width: 54, height: 54, borderRadius: 18, background: ROSE, color: "#fff",
+            display: "grid", placeItems: "center", boxShadow: "0 12px 26px -8px rgba(110,43,67,.6)" }}><Plus size={25} /></button>
+      )}
+
+      {editing && <EditModal item={editing} isDesktop={isDesktop} onClose={() => setEditing(null)} onSave={upsert} />}
+      {viewing && <DetailModal item={viewing} isDesktop={isDesktop} onClose={() => setViewing(null)}
+        onStatus={setStatus} onPatch={patch}
+        onEdit={(it) => { setViewing(null); setEditing(it); }} onDelete={remove} />}
+    </div>
+  );
+}
+
+const Pill = ({ n, active }) => (
+  <span style={{ background: active ? ROSE : "rgba(255,255,255,.25)", color: "#fff", fontSize: 11, fontWeight: 700, minWidth: 20, height: 20, borderRadius: 10, display: "grid", placeItems: "center", padding: "0 6px" }}>{n}</span>
+);
+
+function GlobalStyle() {
+  return <style>{`
+    *{-webkit-tap-highlight-color:transparent}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    .fu{animation:fadeUp .4s ease both}
+    .card{background:${CARD};border:1px solid ${LINE};border-radius:16px;box-shadow:0 1px 3px rgba(110,43,67,.05),0 10px 30px -18px rgba(110,43,67,.18)}
+    .btn{cursor:pointer;border:none;border-radius:10px;font-weight:600;transition:.15s;font-family:inherit}
+    .btn:hover{filter:brightness(.96)}
+    .btn:active{transform:scale(.98)}
+    select,input,textarea{font-family:inherit;outline:none}
+    ::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:#E0D2C9;border-radius:8px}
+    h2.sec{font-family:Georgia,serif;font-size:21px;font-weight:700;color:${ROSE_DK};margin:0 0 4px}
+    .subtle{font-size:13px;color:${MUTE};margin:0 0 16px}
+  `}</style>;
+}
+
+/* ============================ shared bits ============================ */
+const Panel = ({ title, right, children, pad = 16 }) => (
+  <div className="card fu" style={{ padding: pad }}>
+    {title && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 14.5, color: ROSE_DK, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 3, background: ROSE }} />{title}</div>
+      {right}
+    </div>}
+    {children}
+  </div>
+);
+const Empty = ({ h = 220, t = "ยังไม่มีข้อมูล" }) => (
+  <div style={{ height: h, display: "grid", placeItems: "center", color: "#B6A89F", fontSize: 13 }}>{t}</div>
+);
+const Tag = ({ children }) => (
+  <span style={{ fontSize: 11, color: "#7A6A62", background: "#F3EAE4", padding: "2px 9px", borderRadius: 20 }}>{children}</span>
+);
+function QcBadge({ c }) {
+  const d = qcDone(c), full = d === QC_ITEMS.length;
+  return <span style={{ fontSize: 11, fontWeight: 700, color: full ? "#3F7D34" : "#B07F1A", background: full ? "#E2EFDA" : "#FBF1D9",
+    padding: "2px 9px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}>
+    <ClipboardCheck size={11} /> QC {d}/{QC_ITEMS.length}</span>;
+}
+
+function StatusPicker({ value, onChange, size = "sm" }) {
+  const [open, setOpen] = useState(false);
+  const st = STATUS_MAP[value] || STATUS[0];
+  return (
+    <span style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
+      <button className="btn" onClick={() => setOpen((o) => !o)}
+        style={{ fontSize: size === "lg" ? 13 : 11, fontWeight: 700, color: st.c, background: st.bg,
+          padding: size === "lg" ? "6px 12px" : "3px 10px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 5 }}>
+        {value} <ChevronDown size={size === "lg" ? 14 : 12} />
+      </button>
+      {open && (<>
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+        <div className="card" style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 41, padding: 6, minWidth: 168, boxShadow: "0 12px 30px -8px rgba(110,43,67,.35)" }}>
+          {STATUS.map((s) => (
+            <button key={s.k} className="btn" onClick={() => { onChange(s.k); setOpen(false); }}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "8px 10px",
+                background: s.k === value ? s.bg : "transparent", color: INK, fontSize: 13, fontWeight: s.k === value ? 700 : 500, borderRadius: 8 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: s.c, flexShrink: 0 }} />{s.k}
+            </button>
+          ))}
+        </div>
+      </>)}
+    </span>
+  );
+}
+
+/* content card used in several lists */
+function ContentCard({ c, onView, onStatus }) {
+  const st = STATUS_MAP[c.status] || STATUS[0];
+  const od = isOverdue(c);
+  return (
+    <div className="card" style={{ padding: 13, display: "flex", gap: 11, alignItems: "flex-start", borderLeft: `4px solid ${st.c}` }}>
+      <div onClick={() => onView(c)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+          {onStatus ? <StatusPicker value={c.status} onChange={(v) => onStatus(c.id, v)} />
+            : <span style={{ fontSize: 11, fontWeight: 700, color: st.c, background: st.bg, padding: "3px 10px", borderRadius: 20 }}>{c.status}</span>}
+          {c.approvedBy && <span style={{ fontSize: 11, fontWeight: 700, color: "#3F7D34", background: "#E2EFDA", padding: "2px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 3 }}><BadgeCheck size={11} /> อนุมัติ</span>}
+          {c.pillar && <Tag>{c.pillar}</Tag>}
+          {c.branch && <Tag>{c.branch}</Tag>}
+          {od && <span style={{ fontSize: 11, fontWeight: 700, color: "#C0392B", background: "#FBE3E0", padding: "2px 9px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}><AlertTriangle size={11} /> เลยกำหนด</span>}
+        </div>
+        <div style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.35 }}>{c.topic || "(ไม่มีหัวข้อ)"}</div>
+        <div style={{ display: "flex", gap: 13, flexWrap: "wrap", marginTop: 7, fontSize: 12, color: MUTE }}>
+          {c.date && <span>📅 {fmtDate(c.date)}</span>}
+          {c.format && <span>🎬 {c.format}</span>}
+          {c.graphic && <span>🎨 {c.graphic}</span>}
+          {c.budget > 0 && <span>💰 {baht(c.budget)}</span>}
+          {c.reach > 0 && <span>👁 {num(c.reach)}</span>}
+          {(c.briefCount > 0) && <span>📎 {c.briefCount}</span>}
+          {(c.finalCount > 0) && <span>🖼 {c.finalCount}</span>}
+          {c.videos?.length > 0 && <span>🎥 {c.videos.length}</span>}
+          <QcBadge c={c} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ DASHBOARD ============================ */
+function Dashboard({ items, stats, go, onExport, isDesktop }) {
+  const statusData = STATUS.map((s) => ({ name: s.k, value: items.filter((i) => i.status === s.k).length, color: s.c })).filter((d) => d.value);
+  const pillarData = PILLARS.map((p, i) => ({ name: p, value: items.filter((x) => x.pillar === p).length, color: PILLAR_COLORS[i] })).filter((d) => d.value);
+  const monthData = useMemo(() => {
+    const map = {};
+    items.forEach((i) => { const m = monthKey(i.date); if (!m) return;
+      map[m] = map[m] || { m, total: 0, done: 0, budget: 0, spent: 0 };
+      map[m].total++; if (i.status === DONE) map[m].done++; map[m].budget += i.budget; map[m].spent += i.spent; });
+    return Object.values(map).sort((a, b) => a.m.localeCompare(b.m)).map((d) => ({ ...d, label: monthLabel(d.m) }));
+  }, [items]);
+  const top = [...items].filter((i) => i.reach > 0).sort((a, b) => b.reach - a.reach).slice(0, 3);
+
+  const kpis = [
+    { label: "คอนเทนต์ทั้งหมด", value: num(stats.total), icon: ListChecks, c: ROSE },
+    { label: "โพสต์เรียบร้อย", value: num(stats.done), icon: CheckCircle2, c: "#3F7D34" },
+    { label: "กำลังดำเนินการ", value: num(stats.inprog), icon: Clock, c: "#B07F1A" },
+    { label: "% สำเร็จ", value: (stats.completion * 100).toFixed(0) + "%", icon: TrendingUp, c: GOLD },
+    { label: "งบยิงแอดรวม", value: baht(stats.budget), icon: Megaphone, c: ROSE_DK },
+    { label: "ใช้จริง", value: baht(stats.spent), icon: Wallet, c: "#C0392B" },
+    { label: "คงเหลือ", value: baht(stats.remain), icon: Wallet, c: "#3F7D34" },
+    { label: "Reach รวม", value: num(stats.reach), icon: Eye, c: "#2E6FB0" },
+  ];
+
+  return (
+    <div className="fu">
+      <h2 className="sec">ภาพรวม</h2>
+      <p className="subtle">สรุปทุกตัวเลขอัตโนมัติจากข้อมูลที่กรอก</p>
+
+      {(stats.overdue > 0 || stats.waiting > 0) && (
+        <button className="btn" onClick={() => go("todo")} style={{ width: "100%", textAlign: "left", marginBottom: 16, background: "#FCEEEC",
+          border: "1px solid #F0C9C2", borderRadius: 14, padding: "13px 16px", display: "flex", alignItems: "center", gap: 11 }}>
+          <Bell size={20} color="#C0392B" />
+          <span style={{ flex: 1, fontSize: 14, color: "#8A2A1E" }}>
+            มี <b>{stats.overdue}</b> งานเลยกำหนด และ <b>{stats.waiting}</b> งานรออนุมัติ — แตะดูที่ “ต้องจัดการ”</span>
+          <ChevronDown size={18} color="#C0392B" style={{ transform: "rotate(-90deg)" }} />
+        </button>
+      )}
+
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
+        {kpis.map((k, i) => <KpiCard key={i} {...k} delay={i} />)}
+      </div>
+
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", marginTop: 16 }}>
+        <Panel title="สัดส่วนสถานะ">
+          {statusData.length ? <ResponsiveContainer width="100%" height={250}>
+            <PieChart><Pie data={statusData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
+              {statusData.map((d, i) => <Cell key={i} fill={d.color} />)}</Pie><Tooltip /><Legend wrapperStyle={{ fontSize: 11.5 }} /></PieChart>
+          </ResponsiveContainer> : <Empty />}
+        </Panel>
+        <Panel title="คอนเทนต์ตามประเภท">
+          {pillarData.length ? <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={pillarData} layout="vertical" margin={{ left: 8, right: 16 }}>
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} /><YAxis type="category" dataKey="name" width={104} tick={{ fontSize: 11 }} /><Tooltip />
+              <Bar dataKey="value" radius={[0, 6, 6, 0]}>{pillarData.map((d, i) => <Cell key={i} fill={d.color} />)}</Bar></BarChart>
+          </ResponsiveContainer> : <Empty />}
+        </Panel>
+      </div>
+
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", marginTop: 14 }}>
+        <Panel title="แนวโน้มรายเดือน">
+          {monthData.length ? <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={monthData} margin={{ left: -16, right: 12 }}><CartesianGrid strokeDasharray="3 3" stroke="#EEE3DC" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Legend wrapperStyle={{ fontSize: 11.5 }} />
+              <Line type="monotone" dataKey="total" name="ทั้งหมด" stroke={ROSE} strokeWidth={2.5} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="done" name="โพสต์แล้ว" stroke="#3F7D34" strokeWidth={2.5} dot={{ r: 3 }} /></LineChart>
+          </ResponsiveContainer> : <Empty />}
+        </Panel>
+        <Panel title="งบ vs ใช้จริง รายเดือน (฿)">
+          {monthData.length ? <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={monthData} margin={{ left: -8, right: 12 }}><CartesianGrid strokeDasharray="3 3" stroke="#EEE3DC" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={(v) => baht(v)} /><Legend wrapperStyle={{ fontSize: 11.5 }} />
+              <Bar dataKey="budget" name="งบ" fill={GOLD} radius={[5, 5, 0, 0]} /><Bar dataKey="spent" name="ใช้จริง" fill={ROSE} radius={[5, 5, 0, 0]} /></BarChart>
+          </ResponsiveContainer> : <Empty />}
+        </Panel>
+      </div>
+
+      {top.length > 0 && (
+        <Panel title="คอนเทนต์ Reach สูงสุด" pad={14}>
+          <div style={{ display: "grid", gap: 8 }}>
+            {top.map((c, i) => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 4px" }}>
+                <span style={{ width: 26, height: 26, borderRadius: 9, background: [GOLD, "#C9B79A", "#E0D2C9"][i], color: "#fff", fontWeight: 800, display: "grid", placeItems: "center", fontSize: 13 }}>{i + 1}</span>
+                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.topic}</span>
+                <span style={{ fontSize: 13, color: "#2E6FB0", fontWeight: 700 }}>👁 {num(c.reach)}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+function KpiCard({ label, value, icon: Icon, c, delay = 0 }) {
+  return (
+    <div className="card fu" style={{ padding: "15px 15px 13px", animationDelay: `${delay * 50}ms`, position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", right: -10, top: -10, width: 60, height: 60, borderRadius: "50%", background: c, opacity: .08 }} />
+      <Icon size={19} color={c} />
+      <div style={{ fontSize: 25, fontWeight: 800, fontFamily: "Georgia,serif", marginTop: 7, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 12, color: MUTE, marginTop: 6 }}>{label}</div>
+    </div>
+  );
+}
+
+/* ============================ NEEDS ATTENTION ============================ */
+function NeedsAttention({ items, onView, onStatus }) {
+  const overdue = items.filter(isOverdue).sort((a, b) => a.due.localeCompare(b.due));
+  const today = items.filter((i) => i.due === todayISO() && i.status !== DONE && i.status !== CANCEL);
+  const week = items.filter((i) => { const d = daysTo(i.due); return i.due && d > 0 && d <= 7 && i.status !== DONE && i.status !== CANCEL; }).sort((a, b) => a.due.localeCompare(b.due));
+  const waiting = items.filter((i) => i.status === APPROVE_WAIT);
+  const qcMiss = items.filter((i) => PRE_POST.includes(i.status) && !qcFull(i));
+  const groups = [
+    { t: "เลยกำหนดส่ง", icon: AlertTriangle, c: "#C0392B", list: overdue },
+    { t: "ครบกำหนดวันนี้", icon: Clock, c: "#C77F0A", list: today },
+    { t: "ครบกำหนดใน 7 วัน", icon: CalendarDays, c: "#B07F1A", list: week },
+    { t: "รออนุมัติ", icon: BadgeCheck, c: "#2E6FB0", list: waiting },
+    { t: "QC ยังไม่ครบ (ใกล้โพสต์)", icon: ClipboardCheck, c: "#7B5EA7", list: qcMiss },
+  ].filter((g) => g.list.length);
+
+  return (
+    <div className="fu">
+      <h2 className="sec">ต้องจัดการ</h2>
+      <p className="subtle">งานที่ต้องตามและตรวจ รวมไว้ที่เดียว</p>
+      {groups.length === 0 && <div className="card" style={{ padding: 36, textAlign: "center", color: "#7FA86F" }}>
+        <CheckCircle2 size={34} color="#3F7D34" style={{ marginBottom: 8 }} /><div style={{ fontSize: 15, fontWeight: 600, color: "#3F7D34" }}>เคลียร์หมดแล้ว ไม่มีงานค้าง 🎉</div></div>}
+      {groups.map((g) => (
+        <div key={g.t} style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 9px" }}>
+            <g.icon size={17} color={g.c} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: INK }}>{g.t}</span>
+            <span style={{ background: g.c, color: "#fff", fontSize: 11, fontWeight: 700, minWidth: 20, height: 20, borderRadius: 10, display: "grid", placeItems: "center", padding: "0 6px" }}>{g.list.length}</span>
+          </div>
+          <div style={{ display: "grid", gap: 9 }}>
+            {g.list.map((c) => <ContentCard key={c.id} c={c} onView={onView} onStatus={onStatus} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ============================ PLAN (LIST) ============================ */
+function Plan({ items, onNew, onView, onEdit, onDelete, onStatus }) {
+  const [q, setQ] = useState(""); const [fS, setFS] = useState(""); const [fB, setFB] = useState(""); const [fM, setFM] = useState("");
+  const months = [...new Set(items.map((i) => monthKey(i.date)).filter(Boolean))].sort();
+  const filtered = items.filter((i) => {
+    if (q && !i.topic.toLowerCase().includes(q.toLowerCase())) return false;
+    if (fS && i.status !== fS) return false; if (fB && i.branch !== fB) return false;
+    if (fM && monthKey(i.date) !== fM) return false; return true;
+  }).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const sel = { padding: "9px 11px", borderRadius: 10, border: "1px solid #E3D6CD", background: "#fff", fontSize: 13.5, color: INK };
+
+  return (
+    <div className="fu">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <h2 className="sec">คอนเทนต์</h2>
+        <button className="btn" onClick={onNew} style={{ background: ROSE, color: "#fff", padding: "9px 15px", fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 }}><Plus size={16} /> เพิ่ม</button>
+      </div>
+      <p className="subtle">แตะการ์ดเพื่อดู/ตรวจงาน · แตะป้ายสถานะเพื่อเปลี่ยนได้ทันที</p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 170 }}>
+          <Search size={16} style={{ position: "absolute", left: 11, top: 11, color: "#B6A89F" }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาหัวข้อ…" style={{ ...sel, width: "100%", paddingLeft: 34, boxSizing: "border-box" }} />
+        </div>
+        <select value={fM} onChange={(e) => setFM(e.target.value)} style={sel}><option value="">ทุกเดือน</option>{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
+        <select value={fB} onChange={(e) => setFB(e.target.value)} style={sel}><option value="">ทุกสาขา</option>{BRANCHES.map((b) => <option key={b} value={b}>{b}</option>)}</select>
+        <select value={fS} onChange={(e) => setFS(e.target.value)} style={sel}><option value="">ทุกสถานะ</option>{STATUS.map((s) => <option key={s.k} value={s.k}>{s.k}</option>)}</select>
+      </div>
+      <div style={{ fontSize: 12.5, color: MUTE, marginBottom: 10 }}>แสดง {filtered.length} จาก {items.length} รายการ</div>
+
+      <div style={{ display: "grid", gap: 9 }}>
+        {filtered.length === 0 && <div className="card" style={{ padding: 30, textAlign: "center", color: "#B6A89F" }}>ไม่พบรายการ — กด “เพิ่ม” เพื่อสร้างใหม่</div>}
+        {filtered.map((c) => (
+          <div key={c.id} style={{ position: "relative" }}>
+            <ContentCard c={c} onView={onView} onStatus={onStatus} />
+            <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 5 }}>
+              <button className="btn" onClick={() => onEdit(c)} style={{ background: "#F3EAE4", color: ROSE_DK, padding: 7 }}><Pencil size={14} /></button>
+              <button className="btn" onClick={() => { if (confirm("ลบรายการนี้?")) onDelete(c.id); }} style={{ background: "#FBE3E0", color: "#C0392B", padding: 7 }}><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================ CALENDAR ============================ */
+function CalendarView({ items, onView }) {
+  const [cur, setCur] = useState(() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; });
+  const startDow = new Date(cur.y, cur.m, 1).getDay();
+  const days = new Date(cur.y, cur.m + 1, 0).getDate();
+  const byDay = {};
+  items.forEach((i) => { if (monthKey(i.date) === `${cur.y}-${String(cur.m + 1).padStart(2, "0")}`) { const d = +i.date.slice(8, 10); (byDay[d] = byDay[d] || []).push(i); } });
+  const names = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  const cells = [...Array(startDow).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  return (
+    <div className="fu">
+      <h2 className="sec">ปฏิทิน</h2>
+      <p className="subtle">แตะที่งานเพื่อดูรายละเอียด</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <button className="btn" onClick={() => setCur((c) => c.m === 0 ? { y: c.y - 1, m: 11 } : { ...c, m: c.m - 1 })} style={{ background: "#F3EAE4", color: ROSE_DK, padding: "8px 15px", fontSize: 18 }}>‹</button>
+        <div style={{ fontFamily: "Georgia,serif", fontSize: 18, fontWeight: 700, color: ROSE_DK }}>{names[cur.m]} {cur.y + 543}</div>
+        <button className="btn" onClick={() => setCur((c) => c.m === 11 ? { y: c.y + 1, m: 0 } : { ...c, m: c.m + 1 })} style={{ background: "#F3EAE4", color: ROSE_DK, padding: "8px 15px", fontSize: 18 }}>›</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gap: 5, width: "100%" }}>
+        {["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"].map((d) => <div key={d} style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: MUTE, padding: "4px 0" }}>{d}</div>)}
+        {cells.map((d, i) => (
+          <div key={i} className="card" style={{ minHeight: 80, minWidth: 0, overflow: "hidden", padding: 4, opacity: d ? 1 : .3, background: d ? CARD : "transparent", border: d ? `1px solid ${LINE}` : "none", boxShadow: "none" }}>
+            {d && <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTE, marginBottom: 3 }}>{d}</div>}
+            {(byDay[d] || []).slice(0, 3).map((it) => { const st = STATUS_MAP[it.status] || STATUS[0]; return (
+              <div key={it.id} onClick={() => onView(it)} title={it.topic} style={{ cursor: "pointer", fontSize: 10, lineHeight: 1.25, padding: "2px 4px", borderRadius: 5, marginBottom: 3, background: st.bg, color: st.c, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.topic}</div>
+            ); })}
+            {(byDay[d] || []).length > 3 && <div style={{ fontSize: 9.5, color: "#B6A89F" }}>+{byDay[d].length - 3}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================ TEAM / WORKLOAD ============================ */
+function Team({ items }) {
+  const build = (field) => {
+    const map = {};
+    items.forEach((i) => { const who = (i[field] || "").trim(); if (!who) return;
+      map[who] = map[who] || { who, total: 0, done: 0, overdue: 0, inprog: 0 };
+      map[who].total++;
+      if (i.status === DONE) map[who].done++;
+      else if (i.status !== CANCEL) map[who].inprog++;
+      if (isOverdue(i)) map[who].overdue++;
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  };
+  const graphics = build("graphic"), captions = build("caption");
+  const Section = ({ title, rows }) => (
+    <Panel title={title} pad={14}>
+      {rows.length === 0 ? <Empty h={80} t="ยังไม่มีข้อมูล" /> : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {rows.map((r) => (
+            <div key={r.who} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 6px", borderBottom: `1px solid ${"#F0E7E0"}` }}>
+              <div style={{ width: 36, height: 36, borderRadius: 11, background: "#F3EAE4", color: ROSE_DK, fontWeight: 800, display: "grid", placeItems: "center", flexShrink: 0 }}>{r.who.slice(0, 2)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{r.who}</div>
+                <div style={{ fontSize: 11.5, color: MUTE }}>ทั้งหมด {r.total} · เสร็จ {r.done} · ค้าง {r.inprog}</div>
+              </div>
+              {r.overdue > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#C0392B", background: "#FBE3E0", padding: "3px 9px", borderRadius: 20 }}>เลยกำหนด {r.overdue}</span>}
+              <div style={{ width: 64, textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: MUTE }}>{Math.round((r.done / r.total) * 100)}%</div>
+                <div style={{ height: 6, background: "#F0E7E0", borderRadius: 4, marginTop: 3, overflow: "hidden" }}>
+                  <div style={{ width: `${(r.done / r.total) * 100}%`, height: "100%", background: "#3F7D34" }} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+  return (
+    <div className="fu">
+      <h2 className="sec">ภาระงานทีม</h2>
+      <p className="subtle">ดูว่าใครมีงานเท่าไหร่ ค้างกี่ชิ้น เลยกำหนดกี่ชิ้น</p>
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+        <Section title="ทีมกราฟิก" rows={graphics} />
+        <Section title="ทีมแคปชั่น" rows={captions} />
+      </div>
+    </div>
+  );
+}
+
+/* ============================ PERFORMANCE ============================ */
+function Performance({ items, onView }) {
+  const posted = items.filter((i) => i.status === DONE);
+  const totReach = posted.reduce((s, i) => s + i.reach, 0);
+  const totEng = posted.reduce((s, i) => s + i.eng, 0);
+  const totSpent = posted.reduce((s, i) => s + i.spent, 0);
+  const avgER = totReach ? totEng / totReach : 0;
+  const byReach = [...posted].filter((i) => i.reach > 0).sort((a, b) => b.reach - a.reach).slice(0, 5);
+  const byER = [...posted].filter((i) => i.reach > 0).sort((a, b) => engRate(b) - engRate(a)).slice(0, 5);
+  // plan vs actual
+  const planVs = items.filter((i) => i.actualDate && i.date);
+  const late = planVs.filter((i) => i.actualDate > i.date).length;
+  const onTime = planVs.filter((i) => i.actualDate <= i.date).length;
+  const overBudget = items.filter((i) => i.spent > i.budget && i.budget > 0).length;
+
+  const Stat = ({ label, value, sub, c }) => (
+    <div className="card" style={{ padding: 15 }}>
+      <div style={{ fontSize: 12, color: MUTE }}>{label}</div>
+      <div style={{ fontSize: 23, fontWeight: 800, fontFamily: "Georgia,serif", color: c || INK, marginTop: 5 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: MUTE, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+  const RankList = ({ title, rows, metric }) => (
+    <Panel title={title} pad={14}>
+      {rows.length === 0 ? <Empty h={90} /> : <div style={{ display: "grid", gap: 7 }}>
+        {rows.map((c, i) => (
+          <div key={c.id} onClick={() => onView(c)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "7px 4px" }}>
+            <span style={{ width: 24, height: 24, borderRadius: 8, background: i === 0 ? GOLD : "#EFE4DC", color: i === 0 ? "#fff" : MUTE, fontWeight: 800, display: "grid", placeItems: "center", fontSize: 12, flexShrink: 0 }}>{i + 1}</span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.topic}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: ROSE }}>{metric(c)}</span>
+          </div>
+        ))}
+      </div>}
+    </Panel>
+  );
+
+  return (
+    <div className="fu">
+      <h2 className="sec">ผลงาน & ตัวชี้วัด</h2>
+      <p className="subtle">วัดผลคอนเทนต์ที่โพสต์แล้ว และเทียบแผนกับงานจริง</p>
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
+        <Stat label="Reach รวม (โพสต์แล้ว)" value={num(totReach)} c="#2E6FB0" />
+        <Stat label="Engagement รวม" value={num(totEng)} c={ROSE} sub={`อัตรา ${(avgER * 100).toFixed(1)}%`} />
+        <Stat label="ต้นทุนต่อ 1,000 reach" value={totReach ? baht(Math.round((totSpent / totReach) * 1000)) : "—"} c="#C0392B" />
+        <Stat label="โพสต์ตรงแผน" value={`${onTime}/${onTime + late}`} c="#3F7D34" sub={late ? `ช้ากว่าแผน ${late} ชิ้น` : "ตรงเวลาทั้งหมด"} />
+      </div>
+
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", marginTop: 16 }}>
+        <RankList title="Reach สูงสุด" rows={byReach} metric={(c) => "👁 " + num(c.reach)} />
+        <RankList title="Engagement Rate สูงสุด" rows={byER} metric={(c) => (engRate(c) * 100).toFixed(1) + "%"} />
+      </div>
+
+      <Panel title="เทียบแผน vs งานจริง" pad={14}>
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))" }}>
+          <MiniStat label="โพสต์ตรงเวลา" value={onTime} color="#3F7D34" />
+          <MiniStat label="โพสต์ช้ากว่าแผน" value={late} color="#C0392B" />
+          <MiniStat label="ใช้งบเกินที่ตั้งไว้" value={overBudget} color="#C77F0A" />
+          <MiniStat label="ยังไม่ระบุวันโพสต์จริง" value={items.filter((i) => i.status === DONE && !i.actualDate).length} color={MUTE} />
+        </div>
+        <div style={{ fontSize: 11.5, color: MUTE, marginTop: 12 }}>* กรอก “วันที่โพสต์จริง” และ “ใช้จริง” ในแต่ละคอนเทนต์ เพื่อให้การเทียบแม่นยำ</div>
+      </Panel>
+    </div>
+  );
+}
+const MiniStat = ({ label, value, color }) => (
+  <div style={{ textAlign: "center", padding: "12px 8px", background: "#FCF8F5", borderRadius: 12, border: `1px solid ${LINE}` }}>
+    <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "Georgia,serif", color }}>{value}</div>
+    <div style={{ fontSize: 11.5, color: MUTE, marginTop: 3 }}>{label}</div>
+  </div>
+);
+
+/* ============================ DETAIL MODAL ============================ */
+function DetailModal({ item: c, isDesktop, onClose, onStatus, onPatch, onEdit, onDelete }) {
+  const st = STATUS_MAP[c.status] || STATUS[0];
+  const od = isOverdue(c);
+  const [media, setMedia] = useState({ brief: [], final: [] });
+  const [lightbox, setLightbox] = useState(null);
+  const [cmt, setCmt] = useState(""); const [who, setWho] = useState("");
+  const [approver, setApprover] = useState("");
+  useEffect(() => { loadMedia(c.id).then(setMedia); }, [c.id]);
+
+  const toggleQc = (key) => onPatch(c.id, (i) => ({ ...i, qc: { ...i.qc, [key]: !i.qc?.[key] } }));
+  const approve = () => onPatch(c.id, (i) => ({ ...i, approvedBy: approver.trim() || "ผู้ตรวจ", approvedAt: nowISO() }), `อนุมัติโดย ${approver.trim() || "ผู้ตรวจ"}`);
+  const unapprove = () => onPatch(c.id, (i) => ({ ...i, approvedBy: "", approvedAt: "" }), "ยกเลิกอนุมัติ");
+  const addComment = () => { const t = cmt.trim(); if (!t) return;
+    onPatch(c.id, (i) => ({ ...i, comments: [...(i.comments || []), { id: `m${Date.now()}`, who: who.trim() || "ทีม", text: t, at: nowISO() }] }));
+    setCmt(""); };
+
+  const rows = [
+    ["วันที่วางแผนโพสต์", c.date ? fmtDate(c.date) : "—"],
+    ["วันที่โพสต์จริง", c.actualDate ? fmtDate(c.actualDate) : "—"],
+    ["สาขา", c.branch || "—"], ["ประเภท (Pillar)", c.pillar || "—"], ["รูปแบบ", c.format || "—"],
+    ["กราฟิกโดย", c.graphic || "—"], ["แคปชั่นโดย", c.caption || "—"], ["วันส่งกราฟิก", c.due ? fmtDate(c.due) : "—"],
+    ["แพลตฟอร์ม", c.platforms.length ? c.platforms.join(", ") : "—"],
+    ["งบยิงแอด", baht(c.budget)], ["ใช้จริง", baht(c.spent)],
+    ["Reach", num(c.reach)], ["Engagement", num(c.eng) + (c.reach ? ` (${(engRate(c) * 100).toFixed(1)}%)` : "")],
+  ];
+
+  return (
+    <Sheet isDesktop={isDesktop} onClose={onClose} title="รายละเอียด & ตรวจงาน">
+      {/* topic + status */}
+      <div className="card" style={{ padding: 15, marginBottom: 13, boxShadow: "none" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 9 }}>
+          <StatusPicker value={c.status} onChange={(v) => onStatus(c.id, v)} size="lg" />
+          {c.approvedBy && <span style={{ fontSize: 12, fontWeight: 700, color: "#3F7D34", background: "#E2EFDA", padding: "4px 10px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 5 }}><BadgeCheck size={13} /> อนุมัติแล้ว</span>}
+          {od && <span style={{ fontSize: 12, fontWeight: 700, color: "#C0392B", background: "#FBE3E0", padding: "4px 10px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 5 }}><AlertTriangle size={13} /> เลยกำหนด</span>}
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.4, fontFamily: "Georgia,serif" }}>{c.topic || "(ไม่มีหัวข้อ)"}</div>
+      </div>
+
+      {/* QC checklist */}
+      <div className="card" style={{ padding: 14, marginBottom: 13, boxShadow: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: ROSE_DK, display: "flex", alignItems: "center", gap: 7 }}><ClipboardCheck size={16} /> เช็กลิสต์ก่อนโพสต์</span>
+          <QcBadge c={c} />
+        </div>
+        <div style={{ display: "grid", gap: 7 }}>
+          {QC_ITEMS.map((q) => { const on = !!c.qc?.[q.key]; return (
+            <button key={q.key} className="btn" onClick={() => toggleQc(q.key)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", textAlign: "left", background: on ? "#E2EFDA" : "#F7F1ED", borderRadius: 10 }}>
+              <span style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${on ? "#3F7D34" : "#C9B9AF"}`, background: on ? "#3F7D34" : "transparent", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                {on && <CheckCircle2 size={13} color="#fff" />}</span>
+              <span style={{ fontSize: 13.5, color: INK, fontWeight: on ? 600 : 500 }}>{q.label}</span>
+            </button>
+          ); })}
+        </div>
+      </div>
+
+      {/* Approval */}
+      <div className="card" style={{ padding: 14, marginBottom: 13, boxShadow: "none" }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: ROSE_DK, display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}><BadgeCheck size={16} /> การอนุมัติ</span>
+        {c.approvedBy ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13.5 }}>อนุมัติโดย <b>{c.approvedBy}</b> · {fmtDT(c.approvedAt)}</span>
+            <button className="btn" onClick={unapprove} style={{ background: "#FBE3E0", color: "#C0392B", padding: "6px 12px", fontSize: 12.5 }}>ยกเลิกอนุมัติ</button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={approver} onChange={(e) => setApprover(e.target.value)} placeholder="ชื่อผู้อนุมัติ" style={{ flex: 1, padding: "9px 11px", borderRadius: 10, border: "1px solid #E3D6CD", fontSize: 14 }} />
+            <button className="btn" onClick={approve} style={{ background: "#3F7D34", color: "#fff", padding: "0 16px", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><BadgeCheck size={16} /> อนุมัติ</button>
+          </div>
+        )}
+      </div>
+
+      {/* fields */}
+      <div className="card" style={{ padding: 4, marginBottom: 13, boxShadow: "none" }}>
+        {rows.map(([k, v], i) => (
+          <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "11px 13px", borderBottom: i < rows.length - 1 ? "1px solid #F0E7E0" : "none" }}>
+            <span style={{ fontSize: 13, color: MUTE }}>{k}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600, textAlign: "right" }}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* media */}
+      {media.brief.length > 0 && <MediaSection title="📎 รูปบรีฟ / อ้างอิง"><Gallery srcs={media.brief} onOpen={setLightbox} /></MediaSection>}
+      {c.briefLink && <MediaSection title="📝 ลิงก์แคปชั่น / ข้อความบรีฟ"><LinkRow url={c.briefLink} /></MediaSection>}
+      {media.final.length > 0 && <MediaSection title="🖼 รูปงานที่ทำเสร็จ"><Gallery srcs={media.final} onOpen={setLightbox} /></MediaSection>}
+      {c.videos?.length > 0 && <MediaSection title="🎥 วิดีโอ">{c.videos.map((v) => <LinkRow key={v.id} url={v.url} />)}</MediaSection>}
+      {c.note && <div className="card" style={{ padding: 13, marginBottom: 13, boxShadow: "none" }}>
+        <div style={{ fontSize: 12.5, color: MUTE, marginBottom: 5 }}>หมายเหตุ</div>
+        <div style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.note}</div></div>}
+
+      {/* comments */}
+      <div className="card" style={{ padding: 14, marginBottom: 13, boxShadow: "none" }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: ROSE_DK, display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}><MessageSquare size={16} /> คอมเมนต์ / สั่งแก้งาน</span>
+        <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+          {(c.comments || []).length === 0 && <div style={{ fontSize: 12.5, color: "#B6A89F" }}>ยังไม่มีคอมเมนต์</div>}
+          {(c.comments || []).map((m) => (
+            <div key={m.id} style={{ background: "#F7F1ED", borderRadius: 10, padding: "9px 11px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: ROSE_DK }}>{m.who}</span>
+                <span style={{ fontSize: 11, color: "#B6A89F" }}>{fmtDT(m.at)}</span>
+              </div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{m.text}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          <input value={who} onChange={(e) => setWho(e.target.value)} placeholder="ชื่อ" style={{ width: 90, padding: "8px 10px", borderRadius: 9, border: "1px solid #E3D6CD", fontSize: 13 }} />
+          <input value={cmt} onChange={(e) => setCmt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addComment(); }} placeholder="พิมพ์คอมเมนต์…" style={{ flex: 1, padding: "8px 11px", borderRadius: 9, border: "1px solid #E3D6CD", fontSize: 13.5 }} />
+          <button className="btn" onClick={addComment} style={{ background: ROSE, color: "#fff", padding: "0 14px" }}>ส่ง</button>
+        </div>
+      </div>
+
+      {/* activity log */}
+      {(c.log || []).length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 13, boxShadow: "none" }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: ROSE_DK, display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}><History size={16} /> ประวัติการแก้ไข</span>
+          <div style={{ display: "grid", gap: 7 }}>
+            {c.log.slice(0, 12).map((l, i) => (
+              <div key={i} style={{ display: "flex", gap: 9, fontSize: 12.5 }}>
+                <span style={{ color: "#B6A89F", whiteSpace: "nowrap" }}>{fmtDT(l.at)}</span>
+                <span style={{ color: INK }}>{l.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="btn" onClick={() => onEdit(c)} style={{ flex: 1, background: ROSE, color: "#fff", padding: 13, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Pencil size={17} /> แก้ไข</button>
+        <button className="btn" onClick={() => { if (confirm("ลบรายการนี้?")) onDelete(c.id); }} style={{ background: "#FBE3E0", color: "#C0392B", padding: "13px 16px", fontSize: 15, display: "flex", alignItems: "center", gap: 7 }}><Trash2 size={17} /> ลบ</button>
+      </div>
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 70, display: "grid", placeItems: "center", padding: 16 }}>
+          <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 10 }} />
+          <button className="btn" onClick={() => setLightbox(null)} style={{ position: "fixed", top: 16, right: 16, background: "rgba(255,255,255,.2)", color: "#fff", padding: 9 }}><X size={20} /></button>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+const MediaSection = ({ title, children }) => (
+  <div className="card" style={{ padding: 13, marginBottom: 13, boxShadow: "none" }}>
+    <div style={{ fontSize: 12.5, color: MUTE, marginBottom: 8, fontWeight: 600 }}>{title}</div>{children}</div>
+);
+const Gallery = ({ srcs, onOpen }) => (
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
+    {srcs.map((s, i) => <img key={i} src={s} alt="" onClick={() => onOpen(s)} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, cursor: "pointer", border: `1px solid ${LINE}` }} />)}
+  </div>
+);
+const LinkRow = ({ url }) => <a href={url} target="_blank" rel="noreferrer" style={{ display: "block", fontSize: 13.5, color: ROSE, wordBreak: "break-all", padding: "4px 0" }}>{url}</a>;
+
+/* ============================ SHEET (responsive modal) ============================ */
+function Sheet({ isDesktop, onClose, title, children }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(42,32,36,.45)", zIndex: 50, display: "flex",
+      alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", backdropFilter: "blur(2px)", padding: isDesktop ? 24 : 0 }}>
+      <div onClick={(e) => e.stopPropagation()} className="fu"
+        style={{ background: CREAM, width: "100%", maxWidth: 580, maxHeight: isDesktop ? "88vh" : "92vh", overflowY: "auto",
+          borderRadius: isDesktop ? 20 : "20px 20px 0 0", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+        <div style={{ position: "sticky", top: 0, background: `linear-gradient(120deg,${ROSE_DK},${ROSE})`, color: "#fff", padding: "15px 18px",
+          display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: isDesktop ? "20px 20px 0 0" : "20px 20px 0 0", zIndex: 3 }}>
+          <span style={{ fontWeight: 700, fontSize: 16, fontFamily: "Georgia,serif" }}>{title}</span>
+          <button className="btn" onClick={onClose} style={{ background: "rgba(255,255,255,.15)", color: "#fff", padding: 7 }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 18 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ EDIT MODAL ============================ */
+function EditModal({ item, isDesktop, onClose, onSave }) {
+  const [f, setF] = useState({ ...item, videos: item.videos || [] });
+  const [media, setMedia] = useState({ brief: [], final: [] });
+  const [busy, setBusy] = useState(false); const [vid, setVid] = useState("");
+  const originalDue = item.due; // due date locked once set
+  const [dueReason, setDueReason] = useState("");
+  const dueChanged = originalDue && f.due && f.due !== originalDue;
+  useEffect(() => { loadMedia(item.id).then(setMedia); }, [item.id]);
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const togglePlat = (p) => set("platforms", f.platforms.includes(p) ? f.platforms.filter((x) => x !== p) : [...f.platforms, p]);
+  const lbl = { fontSize: 12.5, fontWeight: 600, color: "#7A6A62", marginBottom: 4, display: "block" };
+  const inp = { width: "100%", padding: "9px 11px", borderRadius: 10, border: "1px solid #E3D6CD", fontSize: 14, boxSizing: "border-box", background: "#fff", color: INK };
+  const addImages = async (kind, files) => { if (!files?.length) return; setBusy(true); const out = []; const failed = [];
+    for (const file of Array.from(files)) {
+      try { out.push(await compressImage(file)); } catch { failed.push(file.name || "รูป"); }
+    }
+    if (out.length) setMedia((m) => ({ ...m, [kind]: [...m[kind], ...out] }));
+    setBusy(false);
+    if (failed.length) alert(`เปิดรูปไม่ได้ ${failed.length} ไฟล์: ${failed.join(", ")}\n\nสาเหตุที่พบบ่อย: ไฟล์ .HEIC จากไอโฟน\nวิธีแก้: ตั้งกล้องไอโฟนเป็น “เข้ากันได้มากที่สุด” (Settings ▸ Camera ▸ Formats) หรือบันทึกรูปเป็น JPG ก่อนอัปโหลด`); };
+  const removeImage = (kind, idx) => setMedia((m) => ({ ...m, [kind]: m[kind].filter((_, i) => i !== idx) }));
+  const addVideo = () => { const u = vid.trim(); if (!u) return; set("videos", [...(f.videos || []), { id: `v${Date.now()}`, url: u }]); setVid(""); };
+  const removeVideo = (id) => set("videos", (f.videos || []).filter((v) => v.id !== id));
+
+  return (
+    <Sheet isDesktop={isDesktop} onClose={onClose} title={item.topic ? "แก้ไขคอนเทนต์" : "เพิ่มคอนเทนต์ใหม่"}>
+      <div style={{ display: "grid", gap: 13 }}>
+        <div><label style={lbl}>หัวข้อคอนเทนต์ *</label>
+          <textarea value={f.topic} onChange={(e) => set("topic", e.target.value)} rows={2} style={{ ...inp, resize: "vertical" }} placeholder="เช่น โปรแยก Botox ลดกราม…" /></div>
+        <Row><Field label="วันที่วางแผนโพสต์"><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} style={inp} /></Field>
+          <Field label="สถานะ"><Sel value={f.status} onChange={(v) => set("status", v)} opts={STATUS.map((s) => s.k)} /></Field></Row>
+        <Row><Field label="สาขา"><Sel value={f.branch} onChange={(v) => set("branch", v)} opts={BRANCHES} ph="เลือก" /></Field>
+          <Field label="ประเภท (Pillar)"><Sel value={f.pillar} onChange={(v) => set("pillar", v)} opts={PILLARS} ph="เลือก" /></Field></Row>
+        <Row><Field label="รูปแบบ"><Sel value={f.format} onChange={(v) => set("format", v)} opts={FORMATS} ph="เลือก" /></Field>
+          <Field label="วันส่งกราฟิก (Due)">
+            <input type="date" value={f.due}
+              onChange={(e) => { const v = e.target.value; if (!v && originalDue) return; set("due", v); }}
+              style={inp} />
+          </Field></Row>
+        {originalDue && (
+          <div style={{ marginTop: -4, fontSize: 11.5, color: "#B07F1A", display: "flex", alignItems: "center", gap: 5 }}>
+            <AlertTriangle size={12} /> มีวันส่งงานแล้ว — ลบไม่ได้ หากเปลี่ยนวันต้องระบุเหตุผล
+          </div>
+        )}
+        {dueChanged && (
+          <div style={{ background: "#FBF1D9", border: "1px solid #EAD9A8", borderRadius: 12, padding: 12 }}>
+            <label style={{ ...lbl, color: "#8A6A12" }}>เหตุผลการเปลี่ยนวันส่งงาน (จำเป็น) *</label>
+            <div style={{ fontSize: 12, color: "#9A7A22", marginBottom: 7 }}>
+              จาก {fmtDate(originalDue)} → เป็น {fmtDate(f.due)}
+            </div>
+            <textarea value={dueReason} onChange={(e) => setDueReason(e.target.value)} rows={2}
+              style={{ ...inp, resize: "vertical", borderColor: "#EAD9A8" }} placeholder="เช่น ลูกค้าขอเลื่อน / งานกราฟิกติดคิว…" />
+          </div>
+        )}
+        <Row><Field label="กราฟิกโดย"><input value={f.graphic} onChange={(e) => set("graphic", e.target.value)} style={inp} placeholder="ชื่อทีม" /></Field>
+          <Field label="แคปชั่นโดย"><input value={f.caption} onChange={(e) => set("caption", e.target.value)} style={inp} placeholder="ชื่อทีม" /></Field></Row>
+
+        <div><label style={lbl}>แพลตฟอร์มที่ลง</label>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {PLATFORMS.map((p) => { const on = f.platforms.includes(p); return (
+              <button key={p} className="btn" onClick={() => togglePlat(p)} style={{ padding: "7px 13px", fontSize: 12.5, border: `1px solid ${on ? ROSE : "#E3D6CD"}`, background: on ? ROSE : "#fff", color: on ? "#fff" : "#7A6A62" }}>{p}</button>
+            ); })}
+          </div></div>
+
+        <Row><Field label="งบยิงแอด (฿)"><input type="number" value={f.budget || ""} onChange={(e) => set("budget", e.target.value)} style={inp} placeholder="0" /></Field>
+          <Field label="ใช้จริง (฿)"><input type="number" value={f.spent || ""} onChange={(e) => set("spent", e.target.value)} style={inp} placeholder="0" /></Field></Row>
+        <Row><Field label="Reach"><input type="number" value={f.reach || ""} onChange={(e) => set("reach", e.target.value)} style={inp} placeholder="0" /></Field>
+          <Field label="Engagement"><input type="number" value={f.eng || ""} onChange={(e) => set("eng", e.target.value)} style={inp} placeholder="0" /></Field></Row>
+        <Field label="วันที่โพสต์จริง (กรอกหลังโพสต์)"><input type="date" value={f.actualDate} onChange={(e) => set("actualDate", e.target.value)} style={inp} /></Field>
+
+        {/* MEDIA */}
+        <div style={{ borderTop: "1px solid #EADFD7", paddingTop: 13 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: ROSE_DK, marginBottom: 10 }}>📂 สื่อ / ไฟล์แนบ</div>
+          <label style={lbl}>รูปบรีฟ / รูปอ้างอิง</label>
+          <ImageUploader kind="brief" srcs={media.brief} onAdd={addImages} onRemove={removeImage} busy={busy} />
+          <div style={{ height: 12 }} />
+          <Field label="ลิงก์แคปชั่น / ข้อความบรีฟ"><input value={f.briefLink} onChange={(e) => set("briefLink", e.target.value)} style={inp} placeholder="วางลิงก์ Google Docs / Notes…" /></Field>
+          <div style={{ height: 12 }} />
+          <label style={lbl}>รูปงานที่ทำเสร็จ</label>
+          <ImageUploader kind="final" srcs={media.final} onAdd={addImages} onRemove={removeImage} busy={busy} />
+          <div style={{ height: 12 }} />
+          <label style={lbl}>วิดีโอ (วางลิงก์)</label>
+          <div style={{ display: "flex", gap: 7 }}>
+            <input value={vid} onChange={(e) => setVid(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addVideo(); }} style={{ ...inp, flex: 1 }} placeholder="ลิงก์ YouTube / TikTok / Drive…" />
+            <button className="btn" onClick={addVideo} style={{ background: ROSE, color: "#fff", padding: "0 16px", flexShrink: 0 }}><Plus size={18} /></button>
+          </div>
+          {(f.videos || []).length > 0 && <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+            {f.videos.map((v) => (
+              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#F3EAE4", borderRadius: 9, padding: "7px 10px" }}>
+                <span style={{ flex: 1, fontSize: 12.5, color: ROSE_DK, wordBreak: "break-all" }}>🎥 {v.url}</span>
+                <button className="btn" onClick={() => removeVideo(v.id)} style={{ background: "transparent", color: "#C0392B", padding: 2 }}><X size={16} /></button>
+              </div>
+            ))}
+          </div>}
+        </div>
+
+        <Field label="หมายเหตุ"><textarea value={f.note} onChange={(e) => set("note", e.target.value)} rows={2} style={{ ...inp, resize: "vertical" }} /></Field>
+
+        <button className="btn" disabled={busy} onClick={() => { if (!f.topic.trim()) { alert("กรุณาใส่หัวข้อคอนเทนต์"); return; }
+            if (originalDue && !f.due) { alert("ไม่สามารถลบวันส่งงานที่ตั้งไว้แล้วได้"); return; }
+            if (dueChanged && !dueReason.trim()) { alert("กรุณาระบุเหตุผลการเปลี่ยนวันส่งงาน"); return; }
+            onSave({ ...f, budget: +f.budget || 0, spent: +f.spent || 0, reach: +f.reach || 0, eng: +f.eng || 0 }, media,
+              dueChanged ? { dueChangeReason: dueReason.trim(), oldDue: originalDue } : null); }}
+          style={{ background: busy ? "#C9A9B5" : ROSE, color: "#fff", padding: 13, fontSize: 15, marginTop: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <Save size={18} /> {busy ? "กำลังประมวลผลรูป…" : "บันทึก"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+const Row = ({ children }) => <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>{children}</div>;
+const Field = ({ label, children }) => (
+  <div><label style={{ fontSize: 12.5, fontWeight: 600, color: "#7A6A62", marginBottom: 4, display: "block" }}>{label}</label>{children}</div>
+);
+function Sel({ value, onChange, opts, ph }) {
+  return (
+    <div style={{ position: "relative" }}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 30px 9px 11px", borderRadius: 10, border: "1px solid #E3D6CD", fontSize: 14, background: "#fff", color: INK, appearance: "none", boxSizing: "border-box" }}>
+        {ph && <option value="">{ph}</option>}{opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <ChevronDown size={16} style={{ position: "absolute", right: 9, top: 11, color: "#B6A89F", pointerEvents: "none" }} />
+    </div>
+  );
+}
+function ImageUploader({ kind, srcs, onAdd, onRemove, busy }) {
+  const id = `up_${kind}`;
+  const [drag, setDrag] = useState(false);
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(78px,1fr))", gap: 8 }}>
+        {srcs.map((s, i) => (
+          <div key={i} style={{ position: "relative" }}>
+            <img src={s} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, border: `1px solid ${LINE}` }} />
+            <button className="btn" onClick={() => onRemove(kind, i)} style={{ position: "absolute", top: -6, right: -6, background: "#C0392B", color: "#fff", width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center", padding: 0 }}><X size={13} /></button>
+          </div>
+        ))}
+        <label htmlFor={id}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); onAdd(kind, e.dataTransfer.files); }}
+          style={{ cursor: "pointer", aspectRatio: "1", border: `1.5px dashed ${drag ? ROSE : "#D5C2B6"}`, borderRadius: 10, display: "grid", placeItems: "center", color: drag ? ROSE : "#B6A89F", background: drag ? "#FBEFF3" : "#FCF8F5", transition: ".15s" }}>
+          <div style={{ textAlign: "center", fontSize: 11 }}>{busy ? "…" : <><Plus size={20} /><div style={{ marginTop: 2 }}>เพิ่ม / ลากวาง</div></>}</div>
+        </label>
+      </div>
+      <input id={id} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { onAdd(kind, e.target.files); e.target.value = ""; }} />
+    </div>
+  );
+}
+
+/* ============================ CSV EXPORT ============================ */
+function exportCSV(items) {
+  const head = ["No", "วันที่วางแผน", "วันที่โพสต์จริง", "สาขา", "ประเภท", "รูปแบบ", "หัวข้อ", "กราฟิก", "แคปชั่น",
+    "วันส่งกราฟิก", "สถานะ", "อนุมัติโดย", "QC", "แพลตฟอร์ม", "งบ", "ใช้จริง", "Reach", "Engagement", "EngRate%", "ลิงก์แคปชั่น", "จำนวนวิดีโอ", "หมายเหตุ"];
+  const esc = (v) => { const s = (v ?? "").toString().replace(/"/g, '""'); return `"${s}"`; };
+  const rows = items.map((c, i) => [
+    i + 1, c.date, c.actualDate, c.branch, c.pillar, c.format, c.topic, c.graphic, c.caption,
+    c.due, c.status, c.approvedBy, `${qcDone(c)}/${QC_ITEMS.length}`, c.platforms.join(";"),
+    c.budget, c.spent, c.reach, c.eng, c.reach ? (engRate(c) * 100).toFixed(1) : "", c.briefLink, (c.videos || []).length, c.note,
+  ].map(esc).join(","));
+  const csv = "\uFEFF" + [head.map(esc).join(","), ...rows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `wandee-marketing-${todayISO()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
+createRoot(document.getElementById("root")).render(React.createElement(App));
+
+const b = document.getElementById("boot"); if (b) b.remove();
+</script>
+</body>
+</html>
