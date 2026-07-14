@@ -90,6 +90,16 @@ const SCREENS_COL = "tv_screens";
 const TV_CODE_KEY = "wandee:tv:code";
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"; // ตัดตัวที่อ่านสับสน (0,1,O,I)
 const genTvCode = () => Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
+const LAYOUTS = [
+  { k: "full", label: "เต็มจอ", desc: "โซนเดียวเต็มจอ" },
+  { k: "main-side", label: "หลัก + แถบข้าง", desc: "โซนหลัก 70% ซ้าย · โซนรอง 30% ขวา" },
+  { k: "split", label: "แบ่งครึ่งซ้าย-ขวา", desc: "สองโซนขนาดเท่ากัน 50/50" },
+];
+/* โซนของจอ — รองรับข้อมูลรุ่นเก่าที่เก็บเป็น playlist เดี่ยว */
+const screenZones = (s) => ({
+  main: s?.zones?.main || s?.playlist || [],
+  side: s?.zones?.side || [],
+});
 const isOnline = (lastSeenAt) => {
   if (!lastSeenAt?.toMillis) return false;
   return Date.now() - lastSeenAt.toMillis() < 60000;
@@ -217,7 +227,8 @@ function App() {
   const isDesktop = useIsDesktop();
   const [items, setItems] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState("dash");
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(window.location.search).has("pair") ? "tv" : "dash");
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1192,6 +1203,12 @@ function TVScreens({ isDesktop }) {
     return unsub;
   }, []);
 
+  /* มาจากการสแกน QR บนจอทีวี (?pair=CODE) — เติมรหัสให้เลย เหลือแค่กดจับคู่ */
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("pair");
+    if (p) { setCode(p.toUpperCase()); window.history.replaceState(null, "", window.location.pathname); }
+  }, []);
+
   const pair = async () => {
     const c = code.trim().toUpperCase();
     setPairErr("");
@@ -1235,7 +1252,8 @@ function TVScreens({ isDesktop }) {
 
       <Panel title="จับคู่จอทีวีใหม่">
         <p style={{ fontSize: 13, color: MUTE, margin: "0 0 10px" }}>
-          เปิด <code>{location.origin + location.pathname}?screen=1</code> บนเบราว์เซอร์ของทีวี จะได้รหัส 6 หลัก นำมากรอกด้านล่าง
+          เปิด <code>{location.origin + location.pathname}?screen=1</code> บนเบราว์เซอร์ของทีวี จะขึ้นรหัส 6 หลักพร้อม QR —
+          <b> สแกน QR ด้วยมือถือ</b> รหัสจะถูกกรอกให้อัตโนมัติ หรือพิมพ์รหัสเองด้านล่างก็ได้
         </p>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="รหัสจากทีวี เช่น 7K2M9A"
@@ -1257,10 +1275,11 @@ function TVScreens({ isDesktop }) {
                 <Tag>{s.code}</Tag>
               </div>
               <div style={{ fontSize: 12, color: MUTE, marginBottom: 10 }}>
-                {(s.playlist || []).length} สไลด์ · {isOnline(s.lastSeenAt) ? "ออนไลน์" : "ออฟไลน์"}
+                {(LAYOUTS.find((l) => l.k === (s.layout || "full")) || LAYOUTS[0]).label} · {screenZones(s).main.length + screenZones(s).side.length} สไลด์
+                {s.ticker ? " · มีตัววิ่ง" : ""} · {isOnline(s.lastSeenAt) ? "ออนไลน์" : "ออฟไลน์"}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" onClick={() => setEditing(s)} style={{ flex: 1, background: "#F3EAE4", color: ROSE_DK, padding: "8px", fontSize: 13 }}>จัดการสไลด์</button>
+                <button className="btn" onClick={() => setEditing(s)} style={{ flex: 1, background: "#F3EAE4", color: ROSE_DK, padding: "8px", fontSize: 13 }}>จัดการหน้าจอ</button>
                 <button className="btn" onClick={() => unpair(s.code)} style={{ background: "#FBE3E0", color: "#C0392B", padding: "8px 12px" }}><Trash2 size={15} /></button>
               </div>
             </div>
@@ -1273,9 +1292,17 @@ function TVScreens({ isDesktop }) {
 }
 
 function PlaylistEditor({ isDesktop, screen, onClose }) {
-  const [slides, setSlides] = useState(screen.playlist || []);
+  const [layout, setLayout] = useState(screen.layout || "full");
+  const [zones, setZones] = useState(() => screenZones(screen));
+  const [zone, setZone] = useState("main");
+  const [ticker, setTicker] = useState(screen.ticker || "");
+  const [showClock, setShowClock] = useState(screen.showClock !== false);
   const [f, setF] = useState({ type: "image", url: "", title: "", subtitle: "", duration: 8 });
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (layout === "full") setZone("main"); }, [layout]);
+  const slides = zones[zone] || [];
+  const setSlides = (fn) => setZones((z) => ({ ...z, [zone]: fn(z[zone] || []) }));
 
   const add = () => {
     if (f.type !== "text" && !f.url.trim()) return alert("กรอกลิงก์รูป/วิดีโอก่อน");
@@ -1292,7 +1319,11 @@ function PlaylistEditor({ isDesktop, screen, onClose }) {
 
   const save = async () => {
     setSaving(true);
-    try { await updateDoc(doc(tvDb, SCREENS_COL, screen.code), { playlist: slides, updatedAt: serverTimestamp() }); onClose(); }
+    try {
+      await updateDoc(doc(tvDb, SCREENS_COL, screen.code),
+        { layout, zones, ticker: ticker.trim(), showClock, updatedAt: serverTimestamp() });
+      onClose();
+    }
     catch (e) { alert("บันทึกไม่สำเร็จ: " + (e.message || e)); }
     setSaving(false);
   };
@@ -1300,7 +1331,34 @@ function PlaylistEditor({ isDesktop, screen, onClose }) {
   const TYPE_ICON = { image: ImageIcon, video: Video, text: Type };
 
   return (
-    <Sheet isDesktop={isDesktop} onClose={onClose} title={`สไลด์ของ ${screen.name}`}>
+    <Sheet isDesktop={isDesktop} onClose={onClose} title={`หน้าจอ ${screen.name}`}>
+      <Panel title="รูปแบบการแบ่งจอ">
+        <div style={{ display: "grid", gap: 8 }}>
+          {LAYOUTS.map((l) => (
+            <button key={l.k} className="btn" onClick={() => setLayout(l.k)}
+              style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "10px 12px",
+                background: layout === l.k ? ROSE : "#F3EAE4", color: layout === l.k ? "#fff" : ROSE_DK, borderRadius: 10 }}>
+              <LayoutPreview k={l.k} active={layout === l.k} />
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700, fontSize: 13.5, display: "block" }}>{l.label}</span>
+                <span style={{ fontSize: 11.5, opacity: .85 }}>{l.desc}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Panel>
+
+      {layout !== "full" && (
+        <div style={{ display: "flex", gap: 8, margin: "14px 0 0" }}>
+          {[["main", "โซนหลัก"], ["side", layout === "split" ? "โซนขวา" : "โซนแถบข้าง"]].map(([k, label]) => (
+            <button key={k} className="btn" onClick={() => setZone(k)}
+              style={{ flex: 1, padding: "9px", fontSize: 13, background: zone === k ? GOLD : "#F3EAE4", color: zone === k ? "#fff" : ROSE_DK }}>
+              {label} ({(zones[k] || []).length})
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ height: 14 }} />
       <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
         {slides.length === 0 && <Empty h={100} t="ยังไม่มีสไลด์ เพิ่มด้านล่าง" />}
         {slides.map((s, i) => {
@@ -1352,11 +1410,35 @@ function PlaylistEditor({ isDesktop, screen, onClose }) {
         </div>
       </Panel>
 
+      <div style={{ height: 14 }} />
+      <Panel title="ตัววิ่งข้อความ & นาฬิกา">
+        <input value={ticker} onChange={(e) => setTicker(e.target.value)}
+          placeholder="ข้อความตัววิ่งด้านล่างจอ เช่น โปรเดือนนี้ ลด 20% ทุกสาขา (เว้นว่าง = ไม่แสดง)"
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: `1px solid ${LINE}`, fontSize: 13.5, marginBottom: 10, boxSizing: "border-box" }} />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, cursor: "pointer" }}>
+          <input type="checkbox" checked={showClock} onChange={(e) => setShowClock(e.target.checked)} style={{ width: 17, height: 17, accentColor: ROSE }} />
+          แสดงนาฬิกา + วันที่ มุมขวาบนของจอ
+        </label>
+      </Panel>
+
       <button className="btn" onClick={save} disabled={saving}
         style={{ width: "100%", marginTop: 14, background: ROSE, color: "#fff", padding: "13px", fontSize: 14.5, opacity: saving ? .6 : 1 }}>
-        {saving ? "กำลังบันทึก…" : "บันทึกสไลด์"}
+        {saving ? "กำลังบันทึก…" : "บันทึกหน้าจอ"}
       </button>
     </Sheet>
+  );
+}
+
+/* ไอคอนจิ๋วแสดงรูปแบบการแบ่งจอ */
+function LayoutPreview({ k, active }) {
+  const line = active ? "rgba(255,255,255,.9)" : ROSE;
+  const box = { border: `1.5px solid ${line}`, borderRadius: 3 };
+  return (
+    <span style={{ display: "flex", gap: 2, width: 42, height: 26, flexShrink: 0 }}>
+      {k === "full" && <span style={{ ...box, flex: 1 }} />}
+      {k === "main-side" && <><span style={{ ...box, flex: 7 }} /><span style={{ ...box, flex: 3 }} /></>}
+      {k === "split" && <><span style={{ ...box, flex: 1 }} /><span style={{ ...box, flex: 1 }} /></>}
+    </span>
   );
 }
 
@@ -1413,62 +1495,133 @@ function TVPlayer() {
   if (state === "nofirebase") return shell(<div><Tv size={48} /><p style={{ marginTop: 14, fontSize: 18 }}>ยังไม่ได้ตั้งค่า Firebase<br /><span style={{ fontSize: 14, opacity: .8 }}>ดูขั้นตอนใน TV_SETUP.md</span></p></div>);
   if (state === "error") return shell(<div><AlertTriangle size={48} /><p style={{ marginTop: 14, fontSize: 16 }}>เกิดข้อผิดพลาด: {err}</p></div>);
   if (state === "boot") return shell(<div className="sp" style={{ width: 40, height: 40, border: "3px solid rgba(255,255,255,.35)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .8s linear infinite" }} />);
-  if (state === "pairing") return shell(
-    <div>
-      <Tv size={40} />
-      <p style={{ fontSize: 17, marginTop: 14, opacity: .9 }}>เปิดระบบการตลาด → แท็บ “จอทีวี” แล้วกรอกรหัสนี้</p>
-      <div style={{ fontSize: 72, fontWeight: 800, letterSpacing: 10, margin: "18px 0", fontFamily: "monospace" }}>{code}</div>
-      <p style={{ fontSize: 13, opacity: .7 }}>รอการจับคู่จากแอดมิน…</p>
-    </div>
-  );
-  return <TVSlideshow playlist={screen?.playlist || []} />;
+  if (state === "pairing") {
+    const pairUrl = `${location.origin}${location.pathname}?pair=${code}`;
+    return shell(
+      <div>
+        <Tv size={40} />
+        <p style={{ fontSize: 17, marginTop: 14, opacity: .9 }}>สแกน QR ด้วยมือถือ หรือเปิดระบบการตลาด → แท็บ “จอทีวี” แล้วกรอกรหัสนี้</p>
+        <div style={{ fontSize: 72, fontWeight: 800, letterSpacing: 10, margin: "16px 0", fontFamily: "monospace" }}>{code}</div>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 12, display: "inline-block", margin: "0 0 16px" }}>
+          <img alt="QR สำหรับจับคู่" width={190} height={190} style={{ display: "block" }}
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=190x190&margin=0&data=${encodeURIComponent(pairUrl)}`} />
+        </div>
+        <p style={{ fontSize: 13, opacity: .7 }}>รอการจับคู่จากแอดมิน…</p>
+      </div>
+    );
+  }
+  return <TVLive screen={screen} />;
 }
 
-function TVSlideshow({ playlist }) {
-  const [i, setI] = useState(0);
-  const slide = playlist[i % (playlist.length || 1)];
+/* หน้าจอสด — แบ่งโซนตาม layout + ตัววิ่ง + นาฬิกา */
+function TVLive({ screen }) {
+  const layout = screen?.layout || "full";
+  const { main, side } = screenZones(screen);
+  const ticker = (screen?.ticker || "").trim();
+  const empty = !main.length && !side.length && !ticker;
 
-  useEffect(() => { if (i >= playlist.length) setI(0); }, [playlist, i]);
-  useEffect(() => {
-    if (!playlist.length) return;
-    const t = setTimeout(() => setI((n) => (n + 1) % playlist.length), Math.max(2, +slide?.duration || 8) * 1000);
-    return () => clearTimeout(t);
-  }, [i, playlist, slide]);
-
-  if (!playlist.length) return (
-    <div style={{ position: "fixed", inset: 0, background: ROSE_DK, color: "#fff", display: "grid", placeItems: "center", fontSize: 18 }}>
+  if (empty) return (
+    <div style={{ position: "fixed", inset: 0, background: ROSE_DK, color: "#fff", display: "grid", placeItems: "center", fontSize: 18, textAlign: "center" }}>
       <div><Tv size={40} /><p style={{ marginTop: 12 }}>เชื่อมต่อสำเร็จ — รอเนื้อหาโปรโมชั่นจากแอดมิน</p></div>
     </div>
   );
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000", overflow: "hidden" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#000", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <style>{`
+        @keyframes tvticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+        @keyframes tvfade{from{opacity:0}to{opacity:1}}
+      `}</style>
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{ flex: layout === "main-side" ? 7 : 1, position: "relative", minWidth: 0 }}>
+          <ZonePlayer slides={main} scale={1} />
+        </div>
+        {layout !== "full" && (
+          <div style={{ flex: layout === "main-side" ? 3 : 1, position: "relative", minWidth: 0, borderLeft: "2px solid rgba(255,255,255,.12)" }}>
+            <ZonePlayer slides={side} scale={layout === "split" ? 0.8 : 0.55} />
+          </div>
+        )}
+      </div>
+      {ticker && <Ticker text={ticker} />}
+      {screen?.showClock !== false && <TVClock />}
+    </div>
+  );
+}
+
+/* สไลด์โชว์ของโซนหนึ่ง — วนตามเวลา duration ของแต่ละสไลด์ */
+function ZonePlayer({ slides, scale = 1 }) {
+  const [i, setI] = useState(0);
+  const slide = slides[i % (slides.length || 1)];
+
+  useEffect(() => { if (i >= slides.length) setI(0); }, [slides, i]);
+  useEffect(() => {
+    if (slides.length < 2) return;
+    const t = setTimeout(() => setI((n) => (n + 1) % slides.length), Math.max(2, +slide?.duration || 8) * 1000);
+    return () => clearTimeout(t);
+  }, [i, slides, slide]);
+
+  if (!slides.length) return (
+    <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: `linear-gradient(160deg,${ROSE_DK},${ROSE})`, color: "rgba(255,255,255,.55)" }}>
+      <div style={{ textAlign: "center" }}><Sparkles size={30 * scale + 10} color={GOLD} /><div style={{ fontFamily: "Georgia,serif", fontSize: 22 * scale + 6, marginTop: 8 }}>Wandee Clinic</div></div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       {slide.type === "image" && (
-        <div style={{ position: "relative", width: "100%", height: "100%" }}>
-          <img key={slide.id} src={slide.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          {slide.title && <SlideCaption title={slide.title} />}
+        <div key={slide.id} style={{ position: "relative", width: "100%", height: "100%", animation: "tvfade .6s ease" }}>
+          <img src={slide.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          {slide.title && <SlideCaption title={slide.title} scale={scale} />}
         </div>
       )}
       {slide.type === "video" && (
-        <div style={{ position: "relative", width: "100%", height: "100%" }}>
-          <video key={slide.id} src={slide.url} autoPlay muted loop style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          {slide.title && <SlideCaption title={slide.title} />}
+        <div key={slide.id} style={{ position: "relative", width: "100%", height: "100%", animation: "tvfade .6s ease" }}>
+          <video src={slide.url} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          {slide.title && <SlideCaption title={slide.title} scale={scale} />}
         </div>
       )}
       {slide.type === "text" && (
-        <div key={slide.id} style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: `linear-gradient(160deg,${ROSE_DK},${ROSE})`, color: "#fff", textAlign: "center", padding: 40, boxSizing: "border-box" }}>
+        <div key={slide.id} style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: `linear-gradient(160deg,${ROSE_DK},${ROSE})`, color: "#fff", textAlign: "center", padding: 40 * scale, boxSizing: "border-box", animation: "tvfade .6s ease" }}>
           <div>
-            <div style={{ fontFamily: "Georgia,serif", fontSize: 56, fontWeight: 700 }}>{slide.title}</div>
-            {slide.subtitle && <div style={{ fontSize: 24, marginTop: 16, opacity: .9 }}>{slide.subtitle}</div>}
+            <div style={{ fontFamily: "Georgia,serif", fontSize: 56 * scale, fontWeight: 700 }}>{slide.title}</div>
+            {slide.subtitle && <div style={{ fontSize: 24 * scale, marginTop: 16 * scale, opacity: .9 }}>{slide.subtitle}</div>}
           </div>
         </div>
       )}
     </div>
   );
 }
-const SlideCaption = ({ title }) => (
-  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "linear-gradient(0deg,rgba(0,0,0,.7),transparent)", color: "#fff", padding: "60px 40px 30px", fontSize: 28, fontWeight: 700 }}>{title}</div>
+const SlideCaption = ({ title, scale = 1 }) => (
+  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "linear-gradient(0deg,rgba(0,0,0,.7),transparent)", color: "#fff", padding: `${60 * scale}px ${40 * scale}px ${30 * scale}px`, fontSize: 28 * scale, fontWeight: 700 }}>{title}</div>
 );
+
+/* แถบตัววิ่งข้อความด้านล่างจอ */
+function Ticker({ text }) {
+  const seg = `${text}   •   `;
+  const dur = Math.max(18, seg.length * 0.45);
+  return (
+    <div style={{ height: 58, background: ROSE_DK, borderTop: `3px solid ${GOLD}`, color: "#fff", display: "flex", alignItems: "center", overflow: "hidden", flexShrink: 0 }}>
+      <div style={{ whiteSpace: "nowrap", fontSize: 26, fontWeight: 600, animation: `tvticker ${dur}s linear infinite` }}>
+        {seg.repeat(6)}
+      </div>
+    </div>
+  );
+}
+
+/* นาฬิกา + วันที่ไทย มุมขวาบน */
+function TVClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  const days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const p2 = (n) => String(n).padStart(2, "0");
+  return (
+    <div style={{ position: "absolute", top: 18, right: 24, textAlign: "right", color: "#fff", textShadow: "0 2px 10px rgba(0,0,0,.65)", zIndex: 5, pointerEvents: "none" }}>
+      <div style={{ fontSize: 42, fontWeight: 800, fontFamily: "monospace", lineHeight: 1 }}>{p2(now.getHours())}:{p2(now.getMinutes())}</div>
+      <div style={{ fontSize: 15, opacity: .9, marginTop: 4 }}>วัน{days[now.getDay()]}ที่ {now.getDate()} {months[now.getMonth()]} {now.getFullYear() + 543}</div>
+    </div>
+  );
+}
 
 /* ============================ CSV EXPORT ============================ */
 function exportCSV(items) {
