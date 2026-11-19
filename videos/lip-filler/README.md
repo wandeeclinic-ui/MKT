@@ -35,3 +35,12 @@ and `public/lipfiller/` into its `public/`, and register:
 
 Content notes: avoid absolute claims (e.g. "ปลอดภัย 100%", "อันดับ 1");
 keep "ผลลัพธ์ขึ้นอยู่กับแต่ละบุคคล" on fact and CTA scenes.
+
+### Audio notes (v1.3)
+- The TTS files come out clipped at full scale. `public/lipfiller/vo/*.wav` are
+  de-clipped (`adeclip`) and lowered 9 dB before mixing; keep the raw files out.
+- Render the SFX stem with `sfx/render_linear.py` (no saturation). The engine's
+  own `master()` drives a sparse stem into tanh to reach -14 LUFS, which made the
+  pops sound broken.
+- Final mix: loudnorm -14 LUFS / -2 dBTP so the AAC in the MP4 stays below 0 dBFS.
+- Scene-change sounds and hook ticks were removed on request.
