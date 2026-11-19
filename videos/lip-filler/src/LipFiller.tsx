@@ -140,7 +140,7 @@ const ASPECT: Record<string, number> = {
   'lipfiller/lip-natural.jpg': 900 / 529,
   'lipfiller/lip-cherry.jpg': 900 / 529,
   'lipfiller/lip-cupid.jpg': 900 / 529,
-  'lipfiller/lip-sexy.jpg': 900 / 584,
+  'lipfiller/lip-sexy.jpg': 900 / 529,
   'lipfiller/lift-before.jpg': 620 / 748,
   'lipfiller/lift-after.jpg': 620 / 748,
 };
