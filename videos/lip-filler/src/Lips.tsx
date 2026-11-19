@@ -78,15 +78,36 @@ export const Lips: React.FC<{
   draw?: number; // 0..1 line draw-on progress
   fillOpacity?: number;
   ghost?: LipShape; // faint dashed outline of the "before" lips
-}> = ({shape, size = 640, highlight = 'none', glow = 1, draw = 1, fillOpacity = 0.28, ghost}) => {
+  lineColor?: string;
+  neonColor?: string;
+  fillFrom?: string;
+  fillTo?: string;
+  ghostColor?: string;
+  strokeScale?: number;
+}> = ({
+  shape,
+  size = 640,
+  highlight = 'none',
+  glow = 1,
+  draw = 1,
+  fillOpacity = 0.28,
+  ghost,
+  lineColor = '#fff',
+  neonColor = '#FF6FB5',
+  fillFrom = '#FF8CC6',
+  fillTo = '#C23A86',
+  ghostColor = 'rgba(255,255,255,0.45)',
+  strokeScale = 1,
+}) => {
+  const uid = React.useId().replace(/:/g, '');
   const {upper, mouth, lower, upperFill, lowerFill} = paths(shape);
   const g = ghost ? paths(ghost) : null;
   const dash = 2000;
   const off = dash * (1 - draw);
   const line = {
     fill: 'none',
-    stroke: '#fff',
-    strokeWidth: 3.2,
+    stroke: lineColor,
+    strokeWidth: 3.2 * strokeScale,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     strokeDasharray: dash,
@@ -94,21 +115,21 @@ export const Lips: React.FC<{
   };
   const neon = (on: boolean) => ({
     fill: 'none',
-    stroke: '#FF6FB5',
-    strokeWidth: 7,
+    stroke: neonColor,
+    strokeWidth: 7 * strokeScale,
     strokeLinecap: 'round' as const,
     opacity: on ? glow : 0,
-    filter: 'url(#lipGlow)',
+    filter: `url(#lipGlow${uid})`,
   });
   const hw = shape.width / 2;
   return (
     <svg viewBox="-300 -150 600 290" width={size} height={(size * 290) / 600} style={{overflow: 'visible'}}>
       <defs>
-        <linearGradient id="lipFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#FF8CC6" />
-          <stop offset="1" stopColor="#C23A86" />
+        <linearGradient id={`lipFill${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={fillFrom} />
+          <stop offset="1" stopColor={fillTo} />
         </linearGradient>
-        <filter id="lipGlow" x="-40%" y="-80%" width="180%" height="260%">
+        <filter id={`lipGlow${uid}`} x="-40%" y="-80%" width="180%" height="260%">
           <feGaussianBlur stdDeviation="5" result="b" />
           <feMerge>
             <feMergeNode in="b" />
@@ -118,8 +139,8 @@ export const Lips: React.FC<{
       </defs>
       {/* soft fill */}
       <g opacity={fillOpacity * draw}>
-        <path d={upperFill} fill="url(#lipFill)" />
-        <path d={lowerFill} fill="url(#lipFill)" />
+        <path d={upperFill} fill={`url(#lipFill${uid})`} />
+        <path d={lowerFill} fill={`url(#lipFill${uid})`} />
       </g>
       {/* neon highlight of the area this shape fills */}
       <path d={upper} {...neon(['upper', 'border', 'all'].includes(highlight))} />
@@ -128,17 +149,17 @@ export const Lips: React.FC<{
         <path
           d={`M ${-shape.peak - 26} ${-shape.upper + 10} Q ${-shape.peak} ${-shape.upper - 4} ${-shape.peak * 0.4} ${-shape.upper + shape.bow * 0.6} Q 0 ${-shape.upper + shape.bow + 2} ${shape.peak * 0.4} ${-shape.upper + shape.bow * 0.6} Q ${shape.peak} ${-shape.upper - 4} ${shape.peak + 26} ${-shape.upper + 10}`}
           {...neon(true)}
-          strokeWidth={9}
+          strokeWidth={9 * strokeScale}
         />
       )}
       {highlight === 'corners' && (
-        <g opacity={glow} filter="url(#lipGlow)" fill="none" stroke="#FF6FB5" strokeWidth={6} strokeLinecap="round" strokeLinejoin="round">
+        <g opacity={glow} filter={`url(#lipGlow${uid})`} fill="none" stroke={neonColor} strokeWidth={6 * strokeScale} strokeLinecap="round" strokeLinejoin="round">
           <path d={`M ${-hw - 30} ${shape.corner + 46} L ${-hw - 30} ${shape.corner - 6} M ${-hw - 44} ${shape.corner + 8} L ${-hw - 30} ${shape.corner - 8} L ${-hw - 16} ${shape.corner + 8}`} />
           <path d={`M ${hw + 30} ${shape.corner + 46} L ${hw + 30} ${shape.corner - 6} M ${hw + 16} ${shape.corner + 8} L ${hw + 30} ${shape.corner - 8} L ${hw + 44} ${shape.corner + 8}`} />
         </g>
       )}
       {g && (
-        <g fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={2.4} strokeDasharray="7 9" strokeLinecap="round">
+        <g fill="none" stroke={ghostColor} strokeWidth={2.4 * strokeScale} strokeDasharray="7 9" strokeLinecap="round">
           <path d={g.upper} />
           <path d={g.lower} />
           {highlight === 'corners' && <path d={g.mouth} />}
@@ -146,7 +167,7 @@ export const Lips: React.FC<{
       )}
       {/* line art */}
       <path d={upper} {...line} />
-      <path d={mouth} {...line} strokeWidth={2.6} />
+      <path d={mouth} {...line} strokeWidth={2.6 * strokeScale} />
       <path d={lower} {...line} />
       {/* gloss */}
       <ellipse
