@@ -1,0 +1,52 @@
+{
+ "hook": {
+  "vo": 2.801,
+  "lead": 0.1,
+  "dur": 3.35
+ },
+ "what": {
+  "vo": 6.601,
+  "lead": 0.25,
+  "dur": 7.3
+ },
+ "shape-natural": {
+  "vo": 5.361,
+  "lead": 0.25,
+  "dur": 6.06
+ },
+ "shape-cherry": {
+  "vo": 6.361,
+  "lead": 0.25,
+  "dur": 7.06
+ },
+ "shape-sexy": {
+  "vo": 5.401,
+  "lead": 0.25,
+  "dur": 6.1
+ },
+ "shape-cupid": {
+  "vo": 4.641,
+  "lead": 0.25,
+  "dur": 5.34
+ },
+ "shape-lifted": {
+  "vo": 5.441,
+  "lead": 0.25,
+  "dur": 6.14
+ },
+ "facts": {
+  "vo": 9.721,
+  "lead": 0.25,
+  "dur": 10.42
+ },
+ "care": {
+  "vo": 5.801,
+  "lead": 0.25,
+  "dur": 6.5
+ },
+ "cta": {
+  "vo": 5.481,
+  "lead": 0.25,
+  "dur": 6.18
+ }
+}

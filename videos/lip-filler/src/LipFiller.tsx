@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, interpolate, Sequence, staticFile, useCurrentFrame} from 'remotion';
 import {Highlight, Lips, mixShape, SHAPES} from './Lips';
+import timing from '../../public/lipfiller/vo/timing.json';
 import {B, Background, Caption, FONT, FPS, Header, ink, Logo, PhotoFrame, Pill, rise, Tone, useEnter, useKanit} from './theme';
 
 // ---------------------------------------------------------------------------
@@ -73,7 +74,7 @@ export const SHAPE_INFO: ShapeInfo[] = [
   },
 ];
 
-export const SCENES: {id: string; dur: number; tone: Tone; vo: string}[] = [
+const SCENE_DEFS: {id: string; dur: number; tone: Tone; vo: string}[] = [
   {id: 'hook', dur: 3.6, tone: 'pink', vo: 'เติมปากทรงไหน\nถึงจะเหมาะกับหน้าเรา?'},
   {id: 'what', dur: 5.4, tone: 'white', vo: 'ฟิลเลอร์ปาก คือ HA (ไฮยาลูรอนิก แอซิด)\nช่วยเติมเต็มและปรับรูปทรงริมฝีปาก'},
   ...SHAPE_INFO.map((s) => ({id: `shape-${s.key}`, dur: 5.4, tone: 'pink' as Tone, vo: s.vo})),
@@ -86,6 +87,9 @@ export const SCENES: {id: string; dur: number; tone: Tone; vo: string}[] = [
   {id: 'care', dur: 6, tone: 'black', vo: 'หลังฉีด งดดูดหลอด งดของร้อน\nงดแอลกอฮอล์ และงดทาลิป 1 วันนะคะ'},
   {id: 'cta', dur: 6, tone: 'pink', vo: 'ทรงไหนเหมาะกับหน้าเรา ให้คุณหมอช่วยประเมิน\nทักไลน์ @WandeeClinic ได้เลยค่ะ'},
 ];
+
+// Scene length follows the recorded voice-over (public/lipfiller/vo/timing.json).
+export const SCENES = SCENE_DEFS.map((s) => ({...s, dur: (timing as Record<string, {dur: number}>)[s.id]?.dur ?? s.dur}));
 
 export const sceneStarts = () => {
   let t = 0;
@@ -579,13 +583,23 @@ const SceneBody: React.FC<{id: string}> = ({id}) => {
   return <ShapeScene info={SHAPE_INFO[idx]} index={idx} />;
 };
 
+// Quick punch-in on every cut (the hook has its own).
+const SceneIn: React.FC<{first: boolean; children: React.ReactNode}> = ({first, children}) => {
+  const frame = useCurrentFrame();
+  if (first) return <>{children}</>;
+  const p = interpolate(frame, [0, 7], [0, 1], {extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic)});
+  return <AbsoluteFill style={{opacity: 0.4 + 0.6 * p, transform: `scale(${1.05 - 0.05 * p})`}}>{children}</AbsoluteFill>;
+};
+
 const Scene: React.FC<{id: string; tone: Tone; vo: string; startFrame: number}> = ({id, tone, vo, startFrame}) => {
   const frame = useCurrentFrame();
   return (
     <AbsoluteFill style={{color: ink(tone)}}>
       <Background tone={tone} />
       <Header tone={tone} progress={(startFrame + frame) / TOTAL_FRAMES} />
-      <SceneBody id={id} />
+      <SceneIn first={startFrame === 0}>
+        <SceneBody id={id} />
+      </SceneIn>
       <Caption tone={tone} text={vo} />
     </AbsoluteFill>
   );

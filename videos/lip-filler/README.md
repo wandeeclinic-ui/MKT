@@ -6,9 +6,13 @@ https://wandeeclinic.com/ฟิลเลอร์-ปาก/ . Brand colours fro
 Real lip photos are cropped from that page's own images (`public/lipfiller/`);
 no doctor photos. `src/Lips.tsx` draws the small diagram badges.
 
-Status: **storyboard / silent draft for review** — voice-over not recorded yet.
-Scene durations in `SCENES` (`src/LipFiller.tsx`) are placeholders and should
-follow the voice-over once it exists.
+Status: **voiced v1** — Thai voice-over by Magnific TTS (Gemini 3.8 "sonic_boom",
+voice "Autonoe", one file per scene in `public/lipfiller/vo/`). Scene durations
+follow `public/lipfiller/vo/timing.json` (lead + VO length + 0.45s tail).
+
+Audio: `sfx/lipfiller.py` is a cue sheet for the claude-motion sfx engine
+(whooshes on cuts, pops, soft pad bed); `sfx/mix.sh` mixes the VO files, the SFX
+stem and loudness-normalises to -14 LUFS. Render the video muted, then mux.
 
 ## Files
 
