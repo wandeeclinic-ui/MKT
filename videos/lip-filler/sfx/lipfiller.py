@@ -17,8 +17,7 @@ def score(mix, tl):
     dur = tl["duration"]
     s = tl["starts"]  # scene id -> start seconds
 
-    vol = envelope([(0, 0), (0.6, 1), (dur - 1.5, 1), (dur, 0)])
-    mix.put_stereo(0, *pad(dur, [(0, BED), (s["facts"], BED_B), (s["cta"], BED)], volume=vol), gain=0.03)
+    # background bed now comes from a real music track (public/lipfiller/music), mixed in sfx/mix.sh
 
     # scene-change sounds and hook ticks removed on request
 
