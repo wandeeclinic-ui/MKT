@@ -133,7 +133,18 @@ const Title: React.FC<{top: number; size?: number; children: React.ReactNode; de
 };
 
 const PHOTO_W = 900;
-const PHOTO_H = 530;
+const PHOTO_H = 541;
+const BORDER = 14;
+// Each photo keeps its own aspect ratio, so the frame never crops the lips.
+const ASPECT: Record<string, number> = {
+  'lipfiller/lip-natural.jpg': 900 / 529,
+  'lipfiller/lip-cherry.jpg': 900 / 529,
+  'lipfiller/lip-cupid.jpg': 900 / 529,
+  'lipfiller/lip-sexy.jpg': 900 / 584,
+  'lipfiller/lift-before.jpg': 620 / 748,
+  'lipfiller/lift-after.jpg': 620 / 748,
+};
+const frameW = (src: string, h = PHOTO_H, border = BORDER) => Math.round((h - 2 * border) * (ASPECT[src] ?? 1.7) + 2 * border);
 
 // --- Scene 1: hook ---------------------------------------------------------
 const HOOK_SET = SHAPE_INFO.map((s) => ({photo: s.photo, label: s.th.replace('ทรง', '')}));
@@ -143,7 +154,7 @@ const Hook: React.FC = () => {
   const step = 15;
   const i = Math.floor(frame / step) % HOOK_SET.length;
   const local = frame % step;
-  const zoom = interpolate(local, [0, 8], [1.12, 1], {extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic)});
+  const zoom = interpolate(local, [0, 8], [1.06, 1], {extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic)}); // pops the whole frame, never the photo inside it
   const punch = interpolate(frame, [0, 12], [1.12, 1], {extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic)});
   const badge = useEnter(2, 14);
   return (
@@ -161,7 +172,7 @@ const Hook: React.FC = () => {
         </div>
       </div>
       <div style={{position: 'absolute', top: 650, left: 0, right: 0, display: 'flex', justifyContent: 'center'}}>
-        <PhotoFrame src={HOOK_SET[i].photo} width={PHOTO_W} height={PHOTO_H} imgStyle={{transform: `scale(${zoom})`}} />
+        <PhotoFrame src={HOOK_SET[i].photo} width={frameW(HOOK_SET[i].photo)} height={PHOTO_H} style={{transform: `scale(${zoom})`}} />
       </div>
       <div style={{position: 'absolute', top: 1210, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 12}}>
         {HOOK_SET.map((s, k) => (
@@ -272,10 +283,10 @@ const ShapeBadge: React.FC<{info: ShapeInfo}> = ({info}) => {
     <div
       style={{
         position: 'absolute',
-        right: -20,
-        bottom: -34,
-        width: 250,
-        height: 250,
+        right: -34,
+        top: -64,
+        width: 200,
+        height: 200,
         borderRadius: '50%',
         background: B.black,
         border: `8px solid ${B.white}`,
@@ -288,7 +299,7 @@ const ShapeBadge: React.FC<{info: ShapeInfo}> = ({info}) => {
       <Lips
         shape={SHAPES[info.key]}
         ghost={info.key === 'lifted' ? SHAPES.before : undefined}
-        size={200}
+        size={160}
         highlight={info.highlight}
         glow={glow}
         lineColor={B.white}
@@ -307,7 +318,7 @@ const ShapeScene: React.FC<{info: ShapeInfo; index: number}> = ({info, index}) =
   const chip = useEnter(0, 14);
   const card = useEnter(3, 18);
   const rows = useEnter(16, 18);
-  const kb = interpolate(frame, [0, 160], [1.08, 1], {extrapolateRight: 'clamp'}); // slow push on the photo
+  const drift = interpolate(frame, [0, 160], [1, 1.03], {extrapolateRight: 'clamp'}); // slow push on the whole frame
   const lift = info.key === 'lifted';
   return (
     <>
@@ -349,9 +360,9 @@ const ShapeScene: React.FC<{info: ShapeInfo; index: number}> = ({info, index}) =
         }}
       >
         {lift ? (
-          <div style={{position: 'relative', width: PHOTO_W, height: PHOTO_H, display: 'flex', gap: 12}}>
+          <div style={{position: 'relative', height: PHOTO_H, display: 'flex', gap: 12, transform: `scale(${drift})`}}>
             {(['before', 'after'] as const).map((k) => (
-              <PhotoFrame key={k} src={`lipfiller/lift-${k}.jpg`} width={(PHOTO_W - 12) / 2} height={PHOTO_H} radius={36} border={12}>
+              <PhotoFrame key={k} src={`lipfiller/lift-${k}.jpg`} width={frameW(`lipfiller/lift-${k}.jpg`, PHOTO_H, 12)} height={PHOTO_H} radius={36} border={12}>
                 <div style={{position: 'absolute', top: 26, left: 26}}>
                   <Pill variant={k === 'after' ? 'pink' : 'black'} size={30}>
                     {k === 'before' ? 'ก่อน' : 'หลัง'}
@@ -362,7 +373,7 @@ const ShapeScene: React.FC<{info: ShapeInfo; index: number}> = ({info, index}) =
             <ShapeBadge info={info} />
           </div>
         ) : (
-          <PhotoFrame src={info.photo} width={PHOTO_W} height={PHOTO_H} imgStyle={{transform: `scale(${kb})`}}>
+          <PhotoFrame src={info.photo} width={frameW(info.photo)} height={PHOTO_H} style={{transform: `scale(${drift})`}}>
             <ShapeBadge info={info} />
           </PhotoFrame>
         )}
@@ -534,10 +545,10 @@ const Cta: React.FC = () => {
       <div
         style={{
           position: 'absolute',
-          top: 490,
+          top: 470,
           left: 90,
           right: 90,
-          height: 770,
+          height: 836,
           borderRadius: 44,
           background: B.white,
           boxShadow: '0 24px 60px rgba(90,0,40,0.25)',
@@ -547,25 +558,25 @@ const Cta: React.FC = () => {
       >
         <div style={{position: 'absolute', top: 36, left: 36, right: 36, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14}}>
           {photos.map((p) => (
-            <div key={p} style={{height: 168, borderRadius: 24, overflow: 'hidden'}}>
-              <Img src={staticFile(p)} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+            <div key={p} style={{height: 239, borderRadius: 24, overflow: 'hidden', background: '#f4dcd6'}}>
+              <Img src={staticFile(p)} style={{width: '100%', height: '100%', objectFit: 'contain'}} />
             </div>
           ))}
         </div>
-        <div style={{position: 'absolute', top: 440, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: FONT}}>
-          <Logo tone="white" height={92} />
-          <div style={{marginTop: 30, display: 'flex', alignItems: 'center', gap: 16}}>
+        <div style={{position: 'absolute', top: 572, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: FONT}}>
+          <Logo tone="white" height={74} />
+          <div style={{marginTop: 18, display: 'flex', alignItems: 'center', gap: 16}}>
             <div style={{background: '#06C755', color: '#fff', fontWeight: 700, fontSize: 28, padding: '8px 14px', borderRadius: 12}}>LINE</div>
             <div style={{fontWeight: 700, fontSize: 56, color: B.black}}>@WandeeClinic</div>
           </div>
-          <div style={{marginTop: 28, ...rise(btn, 20)}}>
+          <div style={{marginTop: 18, ...rise(btn, 20)}}>
             <Pill variant="pink" size={42}>
               ทักมาปรึกษา
             </Pill>
           </div>
         </div>
       </div>
-      <div style={{position: 'absolute', top: 1282, left: 0, right: 0, textAlign: 'center', fontFamily: FONT, fontSize: 28, color: B.black}}>
+      <div style={{position: 'absolute', top: 1318, left: 0, right: 0, textAlign: 'center', fontFamily: FONT, fontSize: 26, color: B.black}}>
         *ผลลัพธ์ขึ้นอยู่กับแต่ละบุคคล
       </div>
     </>
