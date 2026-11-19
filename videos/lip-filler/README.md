@@ -37,8 +37,11 @@ Content notes: avoid absolute claims (e.g. "ปลอดภัย 100%", "อั
 keep "ผลลัพธ์ขึ้นอยู่กับแต่ละบุคคล" on fact and CTA scenes.
 
 ### Audio notes (v1.3)
-- The TTS files come out clipped at full scale. `public/lipfiller/vo/*.wav` are
-  de-clipped (`adeclip`) and lowered 9 dB before mixing; keep the raw files out.
+- **Root cause of the crackle at scene changes:** Magnific's TTS WAV files contain a
+  second WAV nested inside the data chunk. The inner header (44 bytes) played as a
+  click at every VO start and ~7.6 KB of trailing metadata played as a loud burst at
+  every VO end. Run `sfx/fix_nested_wav.py` on every new TTS file first.
+- Then de-clip (`adeclip`), lower 9 dB, trim silence with 15 ms fades.
 - Render the SFX stem with `sfx/render_linear.py` (no saturation). The engine's
   own `master()` drives a sparse stem into tanh to reach -14 LUFS, which made the
   pops sound broken.
